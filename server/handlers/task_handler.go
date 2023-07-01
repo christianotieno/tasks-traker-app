@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,11 +14,13 @@ type Task struct {
 }
 
 type TaskHandler struct {
-	// TODO: Add dependencies, such as a task service or repository
+	db *sql.DB
 }
 
-func NewTaskHandler() *TaskHandler {
-	return &TaskHandler{}
+func NewTaskHandler(db *sql.DB) *TaskHandler {
+	return &TaskHandler{
+		db: db,
+	}
 }
 
 func (th *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +42,12 @@ func (th *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Use the task service or repository to save the task
+	// Insert the task into the database
+	_, err = th.db.Exec("INSERT INTO tasks (summary, date) VALUES (?, ?)", task.Summary, task.Date)
+	if err != nil {
+		http.Error(w, "Failed to create task", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusCreated)
 }

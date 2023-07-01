@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,11 +10,24 @@ import (
 	"time"
 
 	"github.com/christianotieno/tasks-traker-app/server/handlers"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func TestCreateTask(t *testing.T) {
-	// Given
-	taskHandler := handlers.NewTaskHandler()
+	// Establish a database connection
+	db, err := sql.Open("mysql", "root:password@tcp(localhost:3306)/task_manager")
+	if err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer func(db *sql.DB) {
+		err := db.Close()
+		if err != nil {
+			t.Fatalf("Failed to close database connection: %v", err)
+		}
+	}(db)
+
+	// Create a new task handler with the database connection
+	taskHandler := handlers.NewTaskHandler(db)
 
 	// Task payload
 	task := handlers.Task{
