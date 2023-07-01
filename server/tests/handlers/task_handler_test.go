@@ -15,16 +15,8 @@ import (
 
 func TestCreateTask(t *testing.T) {
 	// Establish a database connection
-	db, err := sql.Open("mysql", "root:password@tcp(localhost:3306)/task_manager")
-	if err != nil {
-		t.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer func(db *sql.DB) {
-		err := db.Close()
-		if err != nil {
-			t.Fatalf("Failed to close database connection: %v", err)
-		}
-	}(db)
+	db := setupTestDB(t)
+	defer teardownTestDB(db)
 
 	// Create a new task handler with the database connection
 	taskHandler := handlers.NewTaskHandler(db)
@@ -60,4 +52,19 @@ func TestCreateTask(t *testing.T) {
 	}
 
 	// TODO: Add additional assertions or checks for more future logic
+}
+
+func setupTestDB(t *testing.T) *sql.DB {
+	db, err := sql.Open("mysql", "root:password@tcp(localhost:3306)/task_manager_test")
+	if err != nil {
+		t.Fatalf("Failed to connect to test database: %v", err)
+	}
+	return db
+}
+
+func teardownTestDB(db *sql.DB) {
+	err := db.Close()
+	if err != nil {
+		return
+	}
 }
