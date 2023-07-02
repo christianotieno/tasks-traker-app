@@ -13,45 +13,78 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-func TestCreateTask(t *testing.T) {
+func TestTaskHandler(t *testing.T) {
 	// Establish a database connection
 	db := setupTestDB(t)
 	defer teardownTestDB(db)
 
 	// Create a new task handler with the database connection
 	taskHandler := handlers.NewTaskHandler(db)
+	t.Run("CreateTask", func(t *testing.T) {
+		// Given
+		// Task payload
+		task := handlers.Task{
+			Summary: "Perform maintenance",
+			Date:    time.Now(),
+		}
+		payload, err := json.Marshal(task)
+		if err != nil {
+			t.Fatalf("Failed to marshal task payload: %v", err)
+		}
 
-	// Task payload
-	task := handlers.Task{
-		Summary: "Perform maintenance",
-		Date:    time.Now(),
-	}
-	payload, err := json.Marshal(task)
-	if err != nil {
-		t.Fatalf("Failed to marshal task payload: %v", err)
-	}
+		// New request with the task payload
+		req, err := http.NewRequest("POST", "/tasks", bytes.NewReader(payload))
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
 
-	// New request with the task payload
-	req, err := http.NewRequest("POST", "/tasks", bytes.NewReader(payload))
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
+		// Response recorder
+		recorder := httptest.NewRecorder()
 
-	// Response recorder
-	recorder := httptest.NewRecorder()
+		// When
+		taskHandler.CreateTask(recorder, req)
 
-	// When
-	taskHandler.CreateTask(recorder, req)
+		// Then
+		resp := recorder.Result()
 
-	// Then
-	resp := recorder.Result()
+		// Check response status code
+		if resp.StatusCode != http.StatusCreated {
+			t.Errorf("Expected status code %d, but got %d", http.StatusCreated, resp.StatusCode)
+		}
+	})
 
-	// Check response status code
-	if resp.StatusCode != http.StatusCreated {
-		t.Errorf("Expected status code %d, but got %d", http.StatusCreated, resp.StatusCode)
-	}
+	t.Run("ListTasks", func(t *testing.T) {
+		// Given
+		// New request
+		req, err := http.NewRequest("GET", "/tasks", nil)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
 
-	// TODO: Add additional assertions or checks for more future logic
+		// Response recorder
+		recorder := httptest.NewRecorder()
+
+		// When
+		taskHandler.ListTasks(recorder, req)
+
+		// Then
+		resp := recorder.Result()
+
+		// Check response status code
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status code %d, but got %d", http.StatusOK, resp.StatusCode)
+		}
+
+		// Check response body
+		var tasks []handlers.Task
+		err = json.NewDecoder(resp.Body).Decode(&tasks)
+		if err != nil {
+			t.Fatalf("Failed to decode response body: %v", err)
+		}
+		if len(tasks) != 3 {
+			t.Errorf("Expected 3, but got %d", len(tasks))
+		}
+	})
 }
 
 func setupTestDB(t *testing.T) *sql.DB {
