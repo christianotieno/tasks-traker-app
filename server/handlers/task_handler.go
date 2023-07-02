@@ -51,3 +51,34 @@ func (th *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 }
+
+func (th *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// TODO: Use the task service or repository to retrieve the list of tasks
+
+	// For now, return a dummy response
+	tasks := []Task{
+		{Summary: "Task 1", Date: time.Now()},
+		{Summary: "Task 2", Date: time.Now()},
+		{Summary: "Task 3", Date: time.Now()},
+	}
+
+	// Serialize tasks to JSON
+	response, err := json.Marshal(tasks)
+	if err != nil {
+		http.Error(w, "Failed to serialize tasks", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(response)
+	if err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		return
+	}
+}

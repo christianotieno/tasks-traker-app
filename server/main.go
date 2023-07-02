@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/christianotieno/tasks-traker-app/server/handlers"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/gorilla/mux"
+
 	"log"
 	"net/http"
 )
@@ -20,12 +23,18 @@ func main() {
 		}
 	}(db)
 
-	taskHandler := handlers.NewTaskHandler()
+	taskHandler := handlers.NewTaskHandler(db)
 	homeHandler := handlers.HomeHandler
 
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/tasks", taskHandler.CreateTask)
+	// Create a new router
+	router := mux.NewRouter()
+
+	// Define the routes
+	router.HandleFunc("/tasks", taskHandler.CreateTask).Methods(http.MethodPost)
+	router.HandleFunc("/tasks", taskHandler.ListTasks).Methods(http.MethodGet)
+	router.HandleFunc("/", homeHandler)
 
 	fmt.Println("Server listening on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Start the server
+	log.Fatal(http.ListenAndServe(":8080", router))
 }
