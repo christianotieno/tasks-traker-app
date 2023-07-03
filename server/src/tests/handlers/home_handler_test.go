@@ -1,12 +1,11 @@
 package handlers_test
 
 import (
+	"github.com/christianotieno/tasks-traker-app/server/src/handlers"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/christianotieno/tasks-traker-app/server/handlers"
 )
 
 func TestHomeHandler(t *testing.T) {
