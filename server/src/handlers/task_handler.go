@@ -8,8 +8,10 @@ import (
 
 // CreateTaskHandler defines the route handler function for creating a task
 func CreateTaskHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	technicianID := vars["id"]
 	taskHandler := models.TaskHandler(db)
-	taskHandler.CreateTask(w, r)
+	taskHandler.CreateTask(w, r, technicianID)
 }
 
 // GetAllTasksHandler defines the route handler function for retrieving all tasks
