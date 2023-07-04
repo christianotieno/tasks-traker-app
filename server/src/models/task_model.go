@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -41,13 +42,41 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert the task into the database
-	_, err = tm.Db.Exec("INSERT INTO tasks (summary, date) VALUES (?, ?)", task.Summary, task.Date)
+	result, err := tm.Db.Exec("INSERT INTO tasks (summary, date) VALUES (?, ?)", task.Summary, task.Date)
 	if err != nil {
 		http.Error(w, "Task creation failed", http.StatusInternalServerError)
 		return
 	}
 
+	// Retrieve the ID of the created task
+	taskID, err := result.LastInsertId()
+	if err != nil {
+		http.Error(w, "Failed to retrieve task ID", http.StatusInternalServerError)
+		return
+	}
+
+	// Retrieve the created task from the database
+	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
+	err = row.Scan(&task.ID, &task.Summary, &task.Date)
+	if err != nil {
+		http.Error(w, "Failed to retrieve created task", http.StatusInternalServerError)
+		return
+	}
+
+	// Serialize the created task to JSON
+	responseJSON, err := json.Marshal(task)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	_, err = w.Write(responseJSON)
+	if err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (tm *TaskModel) GetAllTasks(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +130,131 @@ func (tm *TaskModel) GetAllTasks(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Fatal(err)
+		return
+	}
+}
+
+func (tm *TaskModel) GetTask(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
+
+	var task entities.Task
+	err := row.Scan(&task.ID, &task.Summary, &task.Date)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Task not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+			log.Fatal(err)
+		}
+		return
+	}
+
+	// Serialize task to JSON
+	response, err := json.Marshal(&task)
+	if err != nil {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(response)
+	if err != nil {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
+}
+
+func (tm *TaskModel) UpdateTask(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Decode the request body into a Task struct
+	var updatedTask entities.Task
+	err := json.NewDecoder(r.Body).Decode(&updatedTask)
+	if err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	// Check if the task exists
+	var count int
+	err = tm.Db.QueryRow("SELECT COUNT(*) FROM tasks WHERE id = ?", id).Scan(&count)
+	if err != nil {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
+
+	if count == 0 {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	// Update the task in the database
+	_, err = tm.Db.Exec("UPDATE tasks SET summary = ?, date = ? WHERE id = ?", updatedTask.Summary, updatedTask.Date, id)
+	if err != nil {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
+
+	// Serialize the updated task to JSON
+	responseJSON, err := json.Marshal(updatedTask)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(responseJSON)
+	if err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Delete the task from the database
+	_, err := tm.Db.Exec("DELETE FROM tasks WHERE id = ?", id)
+	if err != nil {
+		http.Error(w, "Task deletion failed", http.StatusInternalServerError)
+		return
+	}
+
+	response := struct {
+		Message string `json:"message"`
+	}{
+		Message: "Task deleted successfully",
+	}
+
+	// Serialize the response to JSON
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(responseJSON)
+	if err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
 		return
 	}
 }
