@@ -3,26 +3,30 @@ package handlers
 import (
 	"database/sql"
 	"github.com/christianotieno/tasks-traker-app/server/src/config"
-	"log"
 )
 
-// openDbConnection connects the database and returns a database connection
-func openDbConnection() (*sql.DB, error) {
-	// Connect to the database
-	db, err := config.DbConnect()
+var db *sql.DB // Declare a global variable for the database connection
+
+// InitDbConnection initializes the database connection
+func InitDbConnection() error {
+	var err error
+	db, err = config.DbConnect()
 	if err != nil {
-		log.Fatal(err)
-		return nil, err
+		return err
 	}
-	return db, nil
+
+	err = db.Ping()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// closeDbConnection closes the database connection
-func closeDbConnection(db *sql.DB) error {
-	err := db.Close()
-	if err != nil {
-		log.Fatal(err)
-		return err
+// CloseDbConnection closes the database connection
+func CloseDbConnection() error {
+	if db != nil {
+		return db.Close()
 	}
 	return nil
 }
