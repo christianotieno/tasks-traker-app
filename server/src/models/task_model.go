@@ -21,7 +21,7 @@ func TaskHandler(db *sql.DB) *TaskModel {
 	}
 }
 
-func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
+func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request, technicianID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Println("Method not allowed")
@@ -42,7 +42,7 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert the task into the database
-	result, err := tm.Db.Exec("INSERT INTO tasks (summary, date) VALUES (?, ?)", task.Summary, task.Date)
+	result, err := tm.Db.Exec("INSERT INTO tasks (summary, date, technician_id) VALUES (?, ?)", task.Summary, task.Date, technicianID)
 	if err != nil {
 		http.Error(w, "Task creation failed", http.StatusInternalServerError)
 		return
@@ -106,7 +106,7 @@ func (tm *TaskModel) GetAllTasks(w http.ResponseWriter, r *http.Request) {
 
 	// Retrieve tasks from the database
 	for rows.Next() {
-		var task entities.Task
+		task := entities.Task{}
 		err := rows.Scan(&task.ID, &task.Summary, &task.Date)
 		if err != nil {
 			http.Error(w, "Failed to retrieve tasks", http.StatusInternalServerError)
@@ -227,6 +227,40 @@ func (tm *TaskModel) UpdateTask(w http.ResponseWriter, r *http.Request, id strin
 func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tasksRow := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
+
+	var task entities.Task
+	taskErr := tasksRow.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
+	if taskErr != nil {
+		if errors.Is(taskErr, sql.ErrNoRows) {
+			http.Error(w, "Task not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+			log.Fatal(taskErr)
+		}
+		return
+	}
+
+	usersRow := tm.Db.QueryRow("SELECT * FROM users WHERE id = ?", task.UserID)
+
+	var user entities.User
+	userErr := usersRow.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Role)
+	if userErr != nil {
+		if errors.Is(userErr, sql.ErrNoRows) {
+			http.Error(w, "User not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+			log.Fatal(userErr)
+		}
+		return
+	}
+
+	// Check if the user role is “Manager”
+	if user.Role != "Manager" {
+		http.Error(w, "Only Managers can delete tasks", http.StatusForbidden)
 		return
 	}
 
