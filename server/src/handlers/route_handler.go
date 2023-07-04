@@ -19,8 +19,10 @@ func RouteHandler() {
 	router.HandleFunc("/tasks", CreateTaskHandler).Methods(http.MethodPost)
 	router.HandleFunc("/tasks", GetAllTasksHandler).Methods(http.MethodGet)
 	router.HandleFunc("/tasks/{id}", GetTaskHandler).Methods(http.MethodGet)
-	router.HandleFunc("/tasks/{id}", UpdateTaskHandler).Methods(http.MethodPatch)
 	router.HandleFunc("/tasks/{id}", DeleteTaskHandler).Methods(http.MethodDelete)
+	router.HandleFunc("/technicians", CreateUserHandler).Methods(http.MethodPost)
+	router.HandleFunc("/technicians/{id}", GetUserHandler).Methods(http.MethodGet)
+	router.HandleFunc("/technician/{id}/tasks", GetAllTasksByUserHandler).Methods(http.MethodGet)
 	router.HandleFunc("/", homeHandler)
 
 	// Redirect URLs with a trailing slash to the non-slash version
@@ -31,4 +33,5 @@ func RouteHandler() {
 	// Start the server
 	log.Println("Server listening on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
+
 }
