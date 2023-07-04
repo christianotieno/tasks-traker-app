@@ -20,7 +20,14 @@ func GetUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func GetAllTasksByUserHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	userID := vars["id"]
+	technicianID := vars["id"]
 	userHandler := models.UserHandler(db)
-	userHandler.GetAllTasksByUserID(w, r, userID)
+	userHandler.GetAllTasksByUserID(w, r, technicianID)
+}
+
+func GetAllUsersAndAllTasksHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	managerID := vars["id"]
+	userHandler := models.UserHandler(db)
+	userHandler.GetAllUsersAndAllTasks(w, r, managerID)
 }

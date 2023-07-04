@@ -133,14 +133,14 @@ func (tm *UserModel) GetUser(w http.ResponseWriter, r *http.Request, userID stri
 	}
 }
 
-func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request, userID string) {
+func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request, technicianID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Println("Method not allowed")
 		return
 	}
 
-	rows, err := tm.Db.Query("SELECT id, summary, date FROM tasks WHERE user_id = ?", userID)
+	rows, err := tm.Db.Query("SELECT id, summary, date FROM tasks WHERE user_id = ?", technicianID)
 	if err != nil {
 		return
 	}
@@ -180,6 +180,92 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Fatal(err)
+		return
+	}
+}
+
+func (tm *UserModel) GetAllUsersAndAllTasks(w http.ResponseWriter, r *http.Request, managerID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		log.Println("Method not allowed")
+		return
+	}
+
+	userRows, usersErr := tm.Db.Query("SELECT id, firstname, lastname, email, role FROM users")
+	if usersErr != nil {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal(usersErr)
+		return
+	}
+
+	defer func(rows *sql.Rows) {
+		err := userRows.Close()
+		if err != nil {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+			log.Fatal(err)
+			return
+		}
+	}(userRows)
+
+	var users []entities.User
+
+	for userRows.Next() {
+		user := entities.User{}
+		err := userRows.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Role)
+		if err != nil {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+			log.Fatal(err)
+			return
+		}
+		users = append(users, user)
+	}
+
+	for i := range users {
+		rows, userErr := tm.Db.Query("SELECT id, summary, date FROM tasks WHERE user_id = ?", users[i].ID)
+		if userErr != nil {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+			log.Fatal(userErr)
+			return
+		}
+
+		defer func(rows *sql.Rows) {
+			err := rows.Close()
+			if err != nil {
+				http.Error(w, "Something went wrong", http.StatusInternalServerError)
+				log.Fatal(err)
+				return
+			}
+		}(rows)
+
+		var tasks []entities.Task
+
+		for rows.Next() {
+			task := entities.Task{}
+			err := rows.Scan(&task.ID, &task.Summary, &task.Date)
+			if err != nil {
+				http.Error(w, "Something went wrong", http.StatusInternalServerError)
+				log.Fatal(err)
+				return
+			}
+			tasks = append(tasks, task)
+		}
+
+		users[i].Tasks = tasks
+	}
+
+	response, resErr := json.Marshal(&users)
+	if resErr != nil {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal(resErr)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, writeErr := w.Write(response)
+	if writeErr != nil {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal(writeErr)
 		return
 	}
 }

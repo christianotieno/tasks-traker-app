@@ -20,9 +20,10 @@ func RouteHandler() {
 	router.HandleFunc("/tasks", GetAllTasksHandler).Methods(http.MethodGet)
 	router.HandleFunc("/tasks/{id}", GetTaskHandler).Methods(http.MethodGet)
 	router.HandleFunc("/tasks/{id}", DeleteTaskHandler).Methods(http.MethodDelete)
-	router.HandleFunc("/technicians", CreateUserHandler).Methods(http.MethodPost)
-	router.HandleFunc("/technicians/{id}", GetUserHandler).Methods(http.MethodGet)
-	router.HandleFunc("/technician/{id}/tasks", GetAllTasksByUserHandler).Methods(http.MethodGet)
+	router.HandleFunc("/users", CreateUserHandler).Methods(http.MethodPost)
+	router.HandleFunc("/users/{id}", GetUserHandler).Methods(http.MethodGet)
+	router.HandleFunc("/users/{id}/tasks", GetAllTasksByUserHandler).Methods(http.MethodGet)
+	router.HandleFunc("/managers/{id}/users", GetAllUsersAndAllTasksHandler).Methods(http.MethodGet)
 	router.HandleFunc("/", homeHandler)
 
 	// Redirect URLs with a trailing slash to the non-slash version
