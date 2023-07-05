@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+
 	"github.com/christianotieno/tasks-traker-app/server/src/config"
 )
 

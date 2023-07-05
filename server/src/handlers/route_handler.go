@@ -1,11 +1,12 @@
 package handlers
 
 import (
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"strings"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/gorilla/mux"
 )
 
 // RouteHandler handles all the routes
@@ -17,11 +18,9 @@ func RouteHandler() {
 
 	// Define the routes
 	router.HandleFunc("/tasks", CreateTaskHandler).Methods(http.MethodPost)
-	router.HandleFunc("/tasks", GetAllTasksHandler).Methods(http.MethodGet)
-	router.HandleFunc("/tasks/{id}", GetTaskHandler).Methods(http.MethodGet)
+	router.HandleFunc("/login", LoginHandler).Methods(http.MethodPost)
 	router.HandleFunc("/tasks/{id}", DeleteTaskHandler).Methods(http.MethodDelete)
 	router.HandleFunc("/users", CreateUserHandler).Methods(http.MethodPost)
-	router.HandleFunc("/users/{id}", GetUserHandler).Methods(http.MethodGet)
 	router.HandleFunc("/users/{id}/tasks", GetAllTasksByUserHandler).Methods(http.MethodGet)
 	router.HandleFunc("/managers/{id}/users", GetAllUsersAndAllTasksHandler).Methods(http.MethodGet)
 	router.HandleFunc("/", homeHandler)
@@ -34,5 +33,4 @@ func RouteHandler() {
 	// Start the server
 	log.Println("Server listening on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
-
 }
