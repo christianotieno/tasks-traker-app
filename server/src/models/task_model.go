@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
+
+	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 )
 
 type TaskModel struct {
@@ -28,8 +30,8 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDFloat := r.Context().Value("userID").(float64)
-	userID := int(userIDFloat)
+	userIDFloat := r.Context().Value("userID").(string)
+	userID, err := strconv.Atoi(userIDFloat)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -93,10 +95,16 @@ func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	tasksRow := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
+	taskID, err := strconv.Atoi(id)
+	if err != nil {
+		http.Error(w, "Invalid task ID", http.StatusBadRequest)
+		return
+	}
+
+	tasksRow := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
 
 	var task entities.Task
-	taskErr := tasksRow.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
+	taskErr := tasksRow.Scan(&task.ID, &task.UserID, &task.Summary, &task.Date)
 	if taskErr != nil {
 		if errors.Is(taskErr, sql.ErrNoRows) {
 			http.Error(w, "Task not found", http.StatusNotFound)
@@ -110,7 +118,7 @@ func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id strin
 	usersRow := tm.Db.QueryRow("SELECT * FROM users WHERE id = ?", task.UserID)
 
 	var user entities.User
-	userErr := usersRow.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Role)
+	userErr := usersRow.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Password, &user.Role)
 	if userErr != nil {
 		if errors.Is(userErr, sql.ErrNoRows) {
 			http.Error(w, "User not found", http.StatusNotFound)
@@ -128,7 +136,7 @@ func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id strin
 	}
 
 	// Delete the task from the database
-	_, err := tm.Db.Exec("DELETE FROM tasks WHERE id = ?", id)
+	_, err = tm.Db.Exec("DELETE FROM tasks WHERE id = ?", taskID)
 	if err != nil {
 		http.Error(w, "Task deletion failed", http.StatusInternalServerError)
 		return
