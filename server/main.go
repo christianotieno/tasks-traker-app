@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/christianotieno/tasks-traker-app/server/src/handlers"
 	"log"
+
+	"github.com/christianotieno/tasks-traker-app/server/src/handlers"
 )
 
 func main() {

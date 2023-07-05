@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 	"io"
 	"log"
 	"net/http"
-
-	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 )
 
 type TaskModel struct {
@@ -29,8 +28,9 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Context().Value("userID")
-	fmt.Printf("userID: %+v\n", userID)
+	userIDFloat := r.Context().Value("userID").(float64)
+	userID := int(userIDFloat)
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Bad Input", http.StatusBadRequest)
@@ -38,7 +38,7 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task := entities.Task{}
-	task.UserID = userID.(int)
+	task.UserID = userID
 	err = json.Unmarshal(body, &task)
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusBadRequest)
@@ -46,8 +46,7 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert the task into the database
-	result, err := tm.Db.Exec("INSERT INTO tasks (summary, date, user_id) VALUES (?, ?, ?)", task.Summary, task.Date, userID)
+	result, err := tm.Db.Exec("INSERT INTO tasks (user_id, summary, date) VALUES (?, ?, ?)", userID, task.Summary, task.Date)
 	if err != nil {
 		fmt.Printf("Task: %+v\n", task)
 		http.Error(w, "Task creation failed", http.StatusInternalServerError)
@@ -55,7 +54,6 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve the ID of the created task
 	taskID, err := result.LastInsertId()
 	if err != nil {
 		http.Error(w, "Failed to retrieve task ID", http.StatusInternalServerError)
@@ -63,9 +61,8 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve the created task from the database
 	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
-	err = row.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
+	err = row.Scan(&task.ID, &task.UserID, &task.Summary, &task.Date)
 	if err != nil {
 		http.Error(w, "Failed to retrieve created task", http.StatusInternalServerError)
 		log.Println(err)

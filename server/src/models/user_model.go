@@ -37,7 +37,7 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Bad Input", http.StatusBadRequest)
-		log.Fatal(err)
+		log.Println(err)
 		return
 	}
 
@@ -49,10 +49,22 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var count int
+	err = tm.Db.QueryRow("SELECT COUNT(*) FROM users WHERE email = ?", user.Email).Scan(&count)
+	if err != nil {
+		http.Error(w, "Failed to query user database", http.StatusInternalServerError)
+		log.Println(err)
+		return
+	}
+	if count > 0 {
+		http.Error(w, "Email already exists, please try again with a different email", http.StatusBadRequest)
+		return
+	}
+
 	// Validate the role
 	if user.Role != "Manager" && user.Role != "Technician" {
 		http.Error(w, "Invalid role, try again!", http.StatusBadRequest)
-		log.Fatal(err)
+		log.Println(err)
 		return
 	}
 
@@ -66,8 +78,8 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Insert the user details into the database
 	result, err := tm.Db.Exec(
-		"INSERT INTO users (first_name, last_name, email, role, password) VALUES (?, ?, ?, ?, ?)",
-		user.FirstName, user.LastName, user.Email, user.Role, string(hashedPassword))
+		"INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)",
+		user.FirstName, user.LastName, user.Email, string(hashedPassword), user.Role)
 	if err != nil {
 		http.Error(w, "User creation failed", http.StatusInternalServerError)
 		log.Fatal(err)
@@ -81,7 +93,15 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 		return
 	}
-
+	// Retrieve the created user from the database
+	createdUser := entities.User{}
+	err = tm.Db.QueryRow("SELECT id, first_name, last_name, email, role FROM users WHERE email = ?", user.Email).
+		Scan(&createdUser.ID, &createdUser.FirstName, &createdUser.LastName, &createdUser.Email, &createdUser.Role)
+	if err != nil {
+		http.Error(w, "Failed to retrieve created user", http.StatusInternalServerError)
+		log.Fatal(err)
+		return
+	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &entities.JWTClaims{
 		UserID: int(userID),
 		StandardClaims: jwt.StandardClaims{
@@ -141,7 +161,6 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 
 	// Retrieve the user ID from the request context
 	userID := r.Context().Value("userID")
-	fmt.Printf("userID: %v\n", userID)
 
 	// Only allow access to tasks belonging to the user
 	rows, err := tm.Db.Query("SELECT id, summary, date FROM tasks WHERE user_id = ?", userID)
@@ -229,7 +248,9 @@ func (tm *UserModel) GetAllUsersAndAllTasks(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userID := r.Context().Value("userID").(int)
+	userIDFloat := r.Context().Value("userID").(float64)
+	userID := int(userIDFloat)
+
 	isManager := tm.isManager(userID)
 	if !isManager {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -263,7 +284,7 @@ func (tm *UserModel) GetAllUsersAndAllTasks(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userRows, usersErr := tm.Db.Query("SELECT id, firstname, lastname, email, role FROM users")
+	userRows, usersErr := tm.Db.Query("SELECT id, first_name, last_name, email, role FROM users")
 	if usersErr != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Println(usersErr)
@@ -374,6 +395,8 @@ func (tm *UserModel) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("user: %v\n", user)
+
 	// Verify the password
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(credentials.Password))
 	if err != nil {
@@ -423,6 +446,7 @@ func (tm *UserModel) isManager(userID int) bool {
 		return false
 	}
 	return role == "Manager"
+
 }
 
 func GenerateJWTToken(userID int, secretKey string) (string, error) {
