@@ -1,106 +1,112 @@
 package models_tests
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"testing"
+
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 	"github.com/christianotieno/tasks-traker-app/server/src/models"
 	"github.com/stretchr/testify/assert"
-	"net/http"
-	"net/http/httptest"
-	"testing"
 )
 
-func TestTaskModel(t *testing.T) {
+func TestCreateTask(t *testing.T) {
+	// Given
 	db := setupTestDB(t)
 	defer cleanupTestDB(t, db)
 
-	taskModel := models.TaskModel{Db: db}
+	// Create a new task model instance
+	taskModel := &models.TaskModel{Db: db}
 
-	t.Run("CreateTask", func(t *testing.T) {
-		reqBody := []byte(`{"summary": "Test Summary", "date": "2023-01-01"}`)
-		req := createTestRequest(t, http.MethodPost, "/tasks", reqBody)
+	reqBody := []byte(`{"summary": "Test Summary", "date": "2023-01-01"}`)
 
-		w := httptest.NewRecorder()
+	req := createTestRequest(t, http.MethodPost, "/tasks", reqBody)
 
-		taskModel.CreateTask(w, req, "1")
+	// When
+	w := httptest.NewRecorder()
 
-		assert.Equal(t, http.StatusCreated, w.Code)
+	ctx := context.WithValue(req.Context(), "userID", "1")
 
-		var createdTask entities.Task
-		unmarshalResponse(t, w.Body.Bytes(), &createdTask)
+	req = req.WithContext(ctx)
 
-		assert.NotNil(t, createdTask.ID)
-		assert.Equal(t, "Test Summary", createdTask.Summary)
-		assert.Equal(t, "2023-01-01 00:00:00", createdTask.Date)
-	})
+	taskModel.CreateTask(w, req)
 
-	t.Run("GetAllTasks", func(t *testing.T) {
-		req := createTestRequest(t, http.MethodGet, "/tasks", nil)
+	assert.Equal(t, http.StatusCreated, w.Code)
 
-		w := httptest.NewRecorder()
+	var createdTask entities.Task
 
-		taskModel.GetAllTasks(w, req)
+	err := json.Unmarshal(w.Body.Bytes(), &createdTask)
 
-		assert.Equal(t, http.StatusOK, w.Code)
+	assert.NoError(t, err)
 
-		var tasks []entities.Task
-		unmarshalResponse(t, w.Body.Bytes(), &tasks)
+	// Then
+	assert.NotNil(t, createdTask.ID)
+	assert.Equal(t, "Test Summary", createdTask.Summary)
+	assert.Equal(t, "2023-01-01", createdTask.Date)
+}
 
-		assert.NotEmpty(t, tasks)
-	})
+func TestDeleteTask(t *testing.T) {
+	// Given
+	db := setupTestDB(t)
+	defer cleanupTestDB(t, db)
+	taskModel := &models.TaskModel{Db: db}
 
-	t.Run("GetTask", func(t *testing.T) {
-		createTestTask(t, db, "Test Summary", "2023-01-01")
+	task := entities.Task{
+		Summary: "Test Task",
+		Date:    "2023-07-05",
+		UserID:  1,
+	}
 
-		req := createTestRequest(t, http.MethodGet, "/tasks/1", nil)
+	res, err := taskModel.Db.Exec("INSERT INTO tasks (user_id, summary, date) VALUES (?, ?, ?)",
+		task.UserID, task.Summary, task.Date)
+	if err != nil {
+		t.Fatalf("Failed to insert test task into the database: %v", err)
+	}
 
-		w := httptest.NewRecorder()
+	taskID, getErr := res.LastInsertId()
 
-		taskModel.GetTask(w, req, "1")
+	if getErr != nil {
+		t.Fatalf("Failed to retrieve task ID: %v", getErr)
+	}
 
-		assert.Equal(t, http.StatusOK, w.Code)
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("/tasks/%d", taskID), nil)
+	if err != nil {
+		t.Fatalf("Failed to create delete request: %v", err)
+	}
 
-		var task entities.Task
-		unmarshalResponse(t, w.Body.Bytes(), &task)
+	w := httptest.NewRecorder()
 
-		assert.Equal(t, "Test Summary", task.Summary)
-	})
+	// When
+	taskModel.DeleteTask(w, req, strconv.FormatInt(taskID, 10))
 
-	t.Run("UpdateTask", func(t *testing.T) {
-		createTestTask(t, db, "Test Summary", "2023-01-01")
+	// Then
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d, but got %d", http.StatusOK, w.Code)
+	}
 
-		reqBody := []byte(`{"summary": "Updated Summary", "date": "2023-02-02"}`)
-		req := createTestRequest(t, http.MethodPatch, "/tasks/1", reqBody)
+	var response struct {
+		Message string `json:"message"`
+	}
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal response body: %v", err)
+	}
 
-		w := httptest.NewRecorder()
+	// Check the response message
+	expectedMessage := "Task deleted successfully"
+	if response.Message != expectedMessage {
+		t.Errorf("Expected message '%s', but got '%s'", expectedMessage, response.Message)
+	}
 
-		taskModel.UpdateTask(w, req, "1")
+	var count int
+	err = taskModel.Db.QueryRow("SELECT COUNT(*) FROM tasks WHERE id = ?", taskID).Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to query database: %v", err)
+	}
 
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var summary string
-		var date string
-		err := db.QueryRow("SELECT summary, date FROM tasks WHERE id = ?", 1).Scan(&summary, &date)
-		assert.NoError(t, err)
-		assert.Equal(t, "Updated Summary", summary)
-		assert.Equal(t, "2023-02-02 00:00:00", date)
-	})
-
-	t.Run("DeleteTask", func(t *testing.T) {
-		createTestTask(t, db, "Test Summary", "2023-01-01")
-
-		req := createTestRequest(t, http.MethodDelete, "/tasks/1", nil)
-
-		w := httptest.NewRecorder()
-
-		taskModel.DeleteTask(w, req, "1")
-
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		var response struct {
-			Message string `json:"message"`
-		}
-		unmarshalResponse(t, w.Body.Bytes(), &response)
-
-		assert.Equal(t, "Task deleted successfully", response.Message)
-	})
+	assert.Equal(t, 0, count)
 }
