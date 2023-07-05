@@ -2,11 +2,12 @@ package handlers
 
 import (
 	"context"
-	"github.com/dgrijalva/jwt-go"
-	"github.com/joho/godotenv"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/joho/godotenv"
 )
 
 func authenticate(next http.Handler) http.Handler {
