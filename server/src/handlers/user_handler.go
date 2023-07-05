@@ -1,9 +1,9 @@
 package handlers
 
 import (
-	"github.com/christianotieno/tasks-traker-app/server/src/models"
-	"github.com/gorilla/mux"
 	"net/http"
+
+	"github.com/christianotieno/tasks-traker-app/server/src/models"
 )
 
 func CreateUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -11,23 +11,23 @@ func CreateUserHandler(w http.ResponseWriter, r *http.Request) {
 	userHandler.CreateUser(w, r)
 }
 
-func GetUserHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["id"]
-	userHandler := models.UserHandler(db)
-	userHandler.GetUser(w, r, userID)
-}
-
 func GetAllTasksByUserHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	technicianID := vars["id"]
 	userHandler := models.UserHandler(db)
-	userHandler.GetAllTasksByUserID(w, r, technicianID)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userHandler.GetAllTasksByUserID(w, r)
+	})
+	authenticate(handler).ServeHTTP(w, r)
 }
 
 func GetAllUsersAndAllTasksHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	managerID := vars["id"]
 	userHandler := models.UserHandler(db)
-	userHandler.GetAllUsersAndAllTasks(w, r, managerID)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userHandler.GetAllUsersAndAllTasks(w, r)
+	})
+	authenticate(handler).ServeHTTP(w, r)
+}
+
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	taskHandler := models.UserHandler(db)
+	taskHandler.Login(w, r)
 }

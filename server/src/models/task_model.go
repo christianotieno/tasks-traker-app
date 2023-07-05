@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -21,30 +22,36 @@ func TaskHandler(db *sql.DB) *TaskModel {
 	}
 }
 
-func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request, technicianID string) {
+func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Println("Method not allowed")
 		return
 	}
 
+	userID := r.Context().Value("userID")
+	fmt.Printf("userID: %+v\n", userID)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Bad Input", http.StatusBadRequest)
+		log.Println("Bad Input", err)
 		return
 	}
-
-	var task entities.Task
+	task := entities.Task{}
+	task.UserID = userID.(int)
 	err = json.Unmarshal(body, &task)
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusBadRequest)
+		log.Println("Unmarshalling failed", err)
 		return
 	}
 
 	// Insert the task into the database
-	result, err := tm.Db.Exec("INSERT INTO tasks (summary, date, technician_id) VALUES (?, ?)", task.Summary, task.Date, technicianID)
+	result, err := tm.Db.Exec("INSERT INTO tasks (summary, date, user_id) VALUES (?, ?, ?)", task.Summary, task.Date, userID)
 	if err != nil {
+		fmt.Printf("Task: %+v\n", task)
 		http.Error(w, "Task creation failed", http.StatusInternalServerError)
+		log.Println(err)
 		return
 	}
 
@@ -52,14 +59,16 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request, technici
 	taskID, err := result.LastInsertId()
 	if err != nil {
 		http.Error(w, "Failed to retrieve task ID", http.StatusInternalServerError)
+		log.Println(err)
 		return
 	}
 
 	// Retrieve the created task from the database
 	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
-	err = row.Scan(&task.ID, &task.Summary, &task.Date)
+	err = row.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
 	if err != nil {
 		http.Error(w, "Failed to retrieve created task", http.StatusInternalServerError)
+		log.Println(err)
 		return
 	}
 
@@ -67,6 +76,7 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request, technici
 	responseJSON, err := json.Marshal(task)
 	if err != nil {
 		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		log.Println(err)
 		return
 	}
 
@@ -75,151 +85,7 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request, technici
 	_, err = w.Write(responseJSON)
 	if err != nil {
 		http.Error(w, "Failed to write response", http.StatusInternalServerError)
-		return
-	}
-}
-
-func (tm *TaskModel) GetAllTasks(w http.ResponseWriter, r *http.Request) {
-
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	rows, err := tm.Db.Query("SELECT * FROM tasks")
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			http.Error(w, "Something went wrong", http.StatusInternalServerError)
-			log.Fatal(err)
-			return
-		}
-	}(rows)
-
-	var tasks []entities.Task
-
-	// Retrieve tasks from the database
-	for rows.Next() {
-		task := entities.Task{}
-		err := rows.Scan(&task.ID, &task.Summary, &task.Date)
-		if err != nil {
-			http.Error(w, "Failed to retrieve tasks", http.StatusInternalServerError)
-			log.Fatal(err)
-			return
-		}
-		tasks = append(tasks, task)
-	}
-
-	// Serialize tasks to JSON
-	response, err := json.Marshal(&tasks)
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(response)
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-}
-
-func (tm *TaskModel) GetTask(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
-
-	var task entities.Task
-	err := row.Scan(&task.ID, &task.Summary, &task.Date)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Task not found", http.StatusNotFound)
-		} else {
-			http.Error(w, "Something went wrong", http.StatusInternalServerError)
-			log.Fatal(err)
-		}
-		return
-	}
-
-	// Serialize task to JSON
-	response, err := json.Marshal(&task)
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(response)
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-}
-
-func (tm *TaskModel) UpdateTask(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPatch {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Decode the request body into a Task struct
-	var updatedTask entities.Task
-	err := json.NewDecoder(r.Body).Decode(&updatedTask)
-	if err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
-		return
-	}
-
-	// Check if the task exists
-	var count int
-	err = tm.Db.QueryRow("SELECT COUNT(*) FROM tasks WHERE id = ?", id).Scan(&count)
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-
-	if count == 0 {
-		http.Error(w, "Task not found", http.StatusNotFound)
-		return
-	}
-
-	// Update the task in the database
-	_, err = tm.Db.Exec("UPDATE tasks SET summary = ?, date = ? WHERE id = ?", updatedTask.Summary, updatedTask.Date, id)
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-
-	// Serialize the updated task to JSON
-	responseJSON, err := json.Marshal(updatedTask)
-	if err != nil {
-		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(responseJSON)
-	if err != nil {
-		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		log.Println(err)
 		return
 	}
 }
@@ -239,7 +105,7 @@ func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id strin
 			http.Error(w, "Task not found", http.StatusNotFound)
 		} else {
 			http.Error(w, "Something went wrong", http.StatusInternalServerError)
-			log.Fatal(taskErr)
+			log.Println(taskErr)
 		}
 		return
 	}
@@ -253,7 +119,7 @@ func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id strin
 			http.Error(w, "User not found", http.StatusNotFound)
 		} else {
 			http.Error(w, "Something went wrong", http.StatusInternalServerError)
-			log.Fatal(userErr)
+			log.Println(userErr)
 		}
 		return
 	}

@@ -8,10 +8,11 @@ const (
 )
 
 type User struct {
-	ID        int64  `json:"id"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-	Email     string `json:"email"`
-	Role      Role   `json:"role"`
-	Tasks     []Task `json:"tasks"`
+	ID        int     `json:"id"`
+	FirstName string  `json:"firstName"`
+	LastName  string  `json:"lastName"`
+	Email     string  `json:"email"`
+	Role      Role    `json:"role"`
+	Tasks     *[]Task `json:"tasks"`
+	Password  string  `json:"-"`
 }
