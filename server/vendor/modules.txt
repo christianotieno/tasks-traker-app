@@ -1,3 +1,7 @@
+# github.com/brianvoe/gofakeit/v6 v6.22.0
+## explicit; go 1.17
+github.com/brianvoe/gofakeit/v6
+github.com/brianvoe/gofakeit/v6/data
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
