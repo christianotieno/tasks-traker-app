@@ -4,13 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/dgrijalva/jwt-go"
-	"github.com/joho/godotenv"
-	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 )
@@ -99,7 +100,6 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 		},
 		Token: string(tokenString),
 	})
-
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Fatal("Failed to serialize responseJSON:", err)
@@ -178,7 +178,6 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return []byte(secret), nil
 	})
-
 	if err != nil {
 		http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
 		return

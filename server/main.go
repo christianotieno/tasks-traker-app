@@ -1,14 +1,14 @@
 package main
 
 import (
-	"github.com/joho/godotenv"
 	"log"
+
+	"github.com/joho/godotenv"
 
 	"github.com/christianotieno/tasks-traker-app/server/src/handlers"
 )
 
 func main() {
-
 	err := godotenv.Load(".env")
 	if err != nil {
 		log.Fatal(err)

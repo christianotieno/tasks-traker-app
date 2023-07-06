@@ -3,10 +3,6 @@ package models_tests
 import (
 	"context"
 	"encoding/json"
-	"github.com/brianvoe/gofakeit/v6"
-	"github.com/christianotieno/tasks-traker-app/server/src/entities"
-	"github.com/christianotieno/tasks-traker-app/server/src/models"
-	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +10,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/brianvoe/gofakeit/v6"
+	"github.com/christianotieno/tasks-traker-app/server/src/entities"
+	"github.com/christianotieno/tasks-traker-app/server/src/models"
+	"github.com/gorilla/mux"
 )
 
 func TestCreateUser(t *testing.T) {
-
 	secret := os.Getenv("SECRET")
 	userData := entities.User{
 		FirstName: gofakeit.FirstName(),

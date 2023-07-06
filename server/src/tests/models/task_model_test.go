@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
@@ -17,36 +18,43 @@ import (
 func TestCreateTask(t *testing.T) {
 	// Given
 	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
 
-	// Create a new task model instance
-	taskModel := &models.TaskModel{Db: db}
+	createTestUser(t)
+	tm := &models.TaskModel{Db: db}
+	// Create a new HTTP request
+	reqBody := `{
+		"summary": "Sample Task",
+		"date": "2023-07-06"
+	}`
+	req, err := http.NewRequest("POST", "/tasks", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	reqBody := []byte(`{"summary": "Test Summary", "date": "2023-01-01"}`)
+	// Set the userID in the request context
+	ctx := context.WithValue(req.Context(), "userID", float64(123))
 
-	req := createTestRequest(t, http.MethodPost, "/tasks", reqBody)
-
-	// When
-	w := httptest.NewRecorder()
-
-	ctx := context.WithValue(req.Context(), "userID", "1")
-
+	// Assign the context with userID to the request
 	req = req.WithContext(ctx)
 
-	taskModel.CreateTask(w, req)
+	// Create a response recorder to capture the response
+	rr := httptest.NewRecorder()
 
-	assert.Equal(t, http.StatusCreated, w.Code)
+	// Call the CreateTask function
+	tm.CreateTask(rr, req)
 
-	var createdTask entities.Task
+	// Check the response status code
+	if rr.Code != http.StatusCreated {
+		t.Errorf("Expected status code %d, but got %d", http.StatusCreated, rr.Code)
+	}
 
-	err := json.Unmarshal(w.Body.Bytes(), &createdTask)
+	// Verify the response body
+	expectedResponseBody := `{"id": 1, "userID": 123, "summary": "Sample Task", "date": "2023-07-06"}`
+	if rr.Body.String() != expectedResponseBody {
+		t.Errorf("Expected response body %s, but got %s", expectedResponseBody, rr.Body.String())
+	}
 
-	assert.NoError(t, err)
-
-	// Then
-	assert.NotNil(t, createdTask.ID)
-	assert.Equal(t, "Test Summary", createdTask.Summary)
-	assert.Equal(t, "2023-01-01", createdTask.Date)
+	// Additional assertions can be added to check the behavior of the function
 }
 
 func TestDeleteTask(t *testing.T) {

@@ -6,13 +6,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/dgrijalva/jwt-go"
-	"golang.org/x/crypto/bcrypt"
 	"log"
 	"net/http"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/brianvoe/gofakeit/v6"
 

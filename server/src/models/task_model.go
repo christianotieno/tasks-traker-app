@@ -30,8 +30,14 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDFloat := r.Context().Value("userID").(string)
-	userID, err := strconv.Atoi(userIDFloat)
+	userIDFloat, ok := r.Context().Value("userID").(float64)
+	if !ok {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Println(errors.New("failed to retrieve userID from context"))
+		return
+	}
+
+	userID := int(userIDFloat)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -44,7 +50,7 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 	err = json.Unmarshal(body, &task)
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusBadRequest)
-		log.Println("Unmarshalling failed", err)
+		log.Println("Unmarshalling failed:", err)
 		return
 	}
 
