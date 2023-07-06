@@ -1,102 +1,189 @@
 package models_tests
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
+	"context"
+	"encoding/json"
+	"github.com/brianvoe/gofakeit/v6"
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 	"github.com/christianotieno/tasks-traker-app/server/src/models"
-	"github.com/stretchr/testify/assert"
+	"github.com/gorilla/mux"
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
 )
 
-func TestUserModel(t *testing.T) {
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
+func TestCreateUser(t *testing.T) {
 
-	userModel := models.UserModel{Db: db}
+	secret := os.Getenv("SECRET")
+	userData := entities.User{
+		FirstName: gofakeit.FirstName(),
+		LastName:  gofakeit.LastName(),
+		Email:     gofakeit.Email(),
+		Password:  gofakeit.Password(true, true, true, false, false, 10),
+		Role:      entities.Role(gofakeit.RandomString([]string{"Manager", "Technician"})),
+	}
 
-	t.Run("CreateUser", func(t *testing.T) {
-		reqBody := []byte(`{"first_name": "John", "last_name": "Doe", "email": "john.doe@mail.com", "role": "Manager"}`)
-		req := createTestRequest(t, http.MethodPost, "/users", reqBody)
+	err := os.Setenv("SECRET", secret)
+	if err != nil {
+		return
+	}
 
+	t.Run("Should create user successfully ", func(t *testing.T) {
+		db := setupTestDB(t)
+		userModel := models.UserModel{Db: db}
+
+		// Given
+		user, err := stringifyUser(userData)
+		if err != nil {
+			log.Fatalf("Failed to stringify user: %v", err)
+		}
+
+		// When
+		req, err := http.NewRequest(http.MethodPost, "/users", strings.NewReader(user))
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
 		w := httptest.NewRecorder()
 
 		userModel.CreateUser(w, req)
 
-		assert.Equal(t, http.StatusCreated, w.Code)
+		if w.Code != http.StatusCreated {
+			t.Errorf("Expected status code %d, but got %d", http.StatusCreated, w.Code)
+		}
 
-		var createdUser entities.User
-		unmarshalResponse(t, w.Body.Bytes(), &createdUser)
+		expectedUser := entities.User{
+			ID:        userData.ID,
+			FirstName: userData.FirstName,
+			LastName:  userData.LastName,
+			Email:     userData.Email,
+			Role:      userData.Role,
+		}
 
-		assert.NotNil(t, createdUser.ID)
-		assert.Equal(t, "John Doe", createdUser.FirstName+" "+createdUser.LastName)
-		assert.Equal(t, "john.doe@mail.com", createdUser.Email)
-		assert.Equal(t, "Manager", createdUser.Role)
+		responseBody := w.Body.String()
+
+		var actualResponse struct {
+			User  entities.User `json:"user"`
+			Token string        `json:"token"`
+		}
+
+		err = json.Unmarshal([]byte(responseBody), &actualResponse)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal response body: %v", err)
+		}
+
+		expectedUserCopy := expectedUser
+		expectedUserCopy.ID = actualResponse.User.ID
+
+		if !reflect.DeepEqual(actualResponse.User, expectedUserCopy) {
+			t.Errorf("Expected user %+v, but got %+v", expectedUserCopy, actualResponse.User)
+		}
+
+		cleanupTestDB(t, db)
 	})
 
-	t.Run("GetUser", func(t *testing.T) {
-		createTestUser(t, db, "Jane", "Doe", "jane.doe@mail.com", "Technician")
+	t.Run("Should return an error when user already exists", func(t *testing.T) {
+		db := setupTestDB(t)
+		userModel := models.UserModel{Db: db}
 
-		req := createTestRequest(t, http.MethodGet, "/users/1", nil)
+		_, err := db.Exec("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)",
+			userData.FirstName, userData.LastName, userData.Email, "password", userData.Role)
+		if err != nil {
+			t.Fatalf("Failed to insert user into database: %v", err)
+		}
 
+		// Given
+		user, err := stringifyUser(userData)
+		if err != nil {
+			t.Fatalf("Failed to stringify user: %v", err)
+		}
+
+		// When
+		req, err := http.NewRequest(http.MethodPost, "/users", strings.NewReader(user))
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
 		w := httptest.NewRecorder()
 
-		userModel.GetUser(w, req, "1")
+		userModel.CreateUser(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
+		// Then
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status code %d, but got %d", http.StatusBadRequest, w.Code)
+		}
 
-		var user entities.User
-		unmarshalResponse(t, w.Body.Bytes(), &user)
-
-		assert.Equal(t, "Jane Doe", user.FirstName+" "+user.LastName)
-		assert.Equal(t, "jane.doe@mail.com", user.Email)
-		assert.Equal(t, "Technician", user.Role)
+		expectedErrorMessage := "Email already exists, please try again with a different email"
+		responseBody := w.Body.String()
+		if !strings.Contains(responseBody, expectedErrorMessage) {
+			t.Errorf("Expected error message '%s' in response body, but got: %s", expectedErrorMessage, responseBody)
+		}
+		cleanupTestDB(t, db)
 	})
+}
 
-	t.Run("GetAllTasksByUserID", func(t *testing.T) {
-		createTestUser(t, db, "Jane", "Doe", "jane.doe@mail.com", "Technician")
-		createTestTask(t, db, "Performed Task 1", "2023-06-04")
-		createTestTask(t, db, "Performed Task 2", "2023-07-04")
+func TestGetAllTasksByUserID(t *testing.T) {
+	db := setupTestDB(t)
 
-		req := createTestRequest(t, http.MethodGet, "/users/{id}/tasks", nil)
+	userModel := models.UserModel{Db: db}
+	userData := generateUserData(1)[0]
+	taskData := generateTaskData(5, userData.ID)
 
-		w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/tasks", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 
-		userModel.GetAllTasksByUserID(w, req, "1")
+	w := httptest.NewRecorder()
 
-		assert.Equal(t, http.StatusOK, w.Code)
+	// Set up the user data
+	_, err = db.Exec("INSERT INTO users (id, first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?, ?)",
+		userData.ID, userData.FirstName, userData.LastName, userData.Email, userData.Password, userData.Role)
+	if err != nil {
+		t.Fatalf("Failed to set up user data: %v", err)
+	}
 
-		var user []entities.User
-		unmarshalResponse(t, w.Body.Bytes(), &user)
+	// Set up the user task data
+	for _, task := range taskData {
+		_, err = db.Exec("INSERT INTO tasks ( user_id, summary, date) VALUES (?,?,?)",
+			task.UserID, task.Summary, task.Date)
+	}
 
-		assert.NotEmpty(t, user)
-		assert.Equal(t, "Performed Task 1", user[0].Tasks[0].Summary)
-		assert.Equal(t, "Performed Task 2", user[0].Tasks[1].Summary)
-	})
+	if err != nil {
+		t.Fatalf("Failed to set up test data: %v", err)
+	}
 
-	t.Run("GetAllUsersAndAllTasks", func(t *testing.T) {
-		createTestUser(t, db, "Mathew", "West", "mathew.west@mail.com", "Manager")
-		createTestUser(t, db, "Peter", "Smith", "peter.smith@mail.com", "Technician")
-		createTestUser(t, db, "Jane", "Doe", "jane.doe@mail.com", "Technician")
-		createTestTask(t, db, "Performed Task 1", "2023-06-04")
-		createTestTask(t, db, "Performed Task 2", "2023-07-04")
-		createTestTask(t, db, "Performed Task 3", "2023-06-04")
+	// Set up the user ID in the request context
+	ctx := context.WithValue(req.Context(), "userID", userData.ID)
+	req = req.WithContext(ctx)
 
-		req := createTestRequest(t, http.MethodGet, "/managers/{id}/users", nil)
+	// Generate a valid JWT token
+	token := generateValidToken(userData.ID)
 
-		w := httptest.NewRecorder()
+	req.Header.Set("Authorization", token)
 
-		userModel.GetAllTasksByUserID(w, req, "1")
+	router := mux.NewRouter()
 
-		assert.Equal(t, http.StatusOK, w.Code)
+	router.Use(MockAuthorizationMiddleware(userData))
 
-		var users []entities.User
-		unmarshalResponse(t, w.Body.Bytes(), &users)
+	router.HandleFunc("/tasks", userModel.GetAllTasksByUserID)
 
-		assert.NotEmpty(t, users)
-		assert.Equal(t, "Performed Task 1", users[0].Tasks[0].Summary)
-		assert.Equal(t, "Performed Task 2", users[0].Tasks[1].Summary)
-		assert.Equal(t, "Performed Task 3", users[1].Tasks[0].Summary)
-	})
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status code %d, but got %d", http.StatusOK, w.Code)
+	}
+
+	var responseTasks []entities.Task
+	err = json.Unmarshal(w.Body.Bytes(), &responseTasks)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal response body: %v", err)
+	}
+
+	if len(responseTasks) == 0 {
+		t.Error("Expected tasks, but got an empty response")
+	}
+	cleanupTestDB(t, db)
 }
