@@ -4,15 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"time"
-
-	"github.com/dgrijalva/jwt-go"
-	"github.com/joho/godotenv"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 )
@@ -44,112 +42,105 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	user := entities.User{}
 	err = json.Unmarshal(body, &user)
 	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusBadRequest)
-		log.Fatal(err)
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		log.Println("Invalid JSON format:", err)
 		return
 	}
 
-	var count int
-	err = tm.Db.QueryRow("SELECT COUNT(*) FROM users WHERE email = ?", user.Email).Scan(&count)
-	if err != nil {
-		http.Error(w, "Failed to query user database", http.StatusInternalServerError)
-		log.Println(err)
-		return
-	}
-	if count > 0 {
+	// Check if the email already exists
+	if tm.userExists(user.Email) {
 		http.Error(w, "Email already exists, please try again with a different email", http.StatusBadRequest)
 		return
 	}
 
 	// Validate the role
-	if user.Role != "Manager" && user.Role != "Technician" {
+	if !tm.isValidRole(string(user.Role)) {
 		http.Error(w, "Invalid role, try again!", http.StatusBadRequest)
-		log.Println(err)
 		return
 	}
 
-	// Hash the user’s password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	// Hash user password
+	hashedPassword, err := tm.hashPassword(user.Password)
 	if err != nil {
-		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
-		log.Fatal(err)
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal("Failed to hash password:", err)
 		return
 	}
 
-	// Insert the user details into the database
-	result, err := tm.Db.Exec(
-		"INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)",
-		user.FirstName, user.LastName, user.Email, string(hashedPassword), user.Role)
+	// Insert user details into the database
+	userID, err := tm.insertUser(user.FirstName, user.LastName, user.Email, string(hashedPassword), string(user.Role))
 	if err != nil {
-		http.Error(w, "User creation failed", http.StatusInternalServerError)
-		log.Fatal(err)
+		http.Error(w, "Something went wrong, try again", http.StatusInternalServerError)
+		log.Fatal("User creation failed:", err)
 		return
 	}
 
-	// Retrieve the ID of the created user
-	userID, err := result.LastInsertId()
+	// Generate JWT token
+	tokenString, err := tm.generateToken(int(userID))
 	if err != nil {
-		http.Error(w, "Failed to retrieve user ID", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-	// Retrieve the created user from the database
-	createdUser := entities.User{}
-	err = tm.Db.QueryRow("SELECT id, first_name, last_name, email, role FROM users WHERE email = ?", user.Email).
-		Scan(&createdUser.ID, &createdUser.FirstName, &createdUser.LastName, &createdUser.Email, &createdUser.Role)
-	if err != nil {
-		http.Error(w, "Failed to retrieve created user", http.StatusInternalServerError)
-		log.Fatal(err)
-		return
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &entities.JWTClaims{
-		UserID: int(userID),
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(time.Hour * 24).Unix(),
-		},
-	})
-
-	err = godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file", err)
-	}
-
-	secret := os.Getenv("SECRET")
-
-	// Sign the token with the JWT signing key
-	jwtKey := []byte(secret)
-	tokenString, err := token.SignedString(jwtKey)
-	if err != nil {
-		http.Error(w, "Failed to generate JWT token", http.StatusInternalServerError)
-		log.Fatal(err)
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal("Failed to generate token:", err)
 		return
 	}
 
-	// Clear the password field in the user struct before serializing to JSON
 	user.Password = ""
 
-	// Serialize the created user account details and the JWT token to JSON
 	responseJSON, err := json.Marshal(struct {
 		User  entities.User `json:"user"`
 		Token string        `json:"token"`
 	}{
-		User:  user,
-		Token: tokenString,
+		User: entities.User{
+			ID:        int(userID),
+			FirstName: user.FirstName,
+			LastName:  user.LastName,
+			Email:     user.Email,
+			Role:      user.Role,
+			Tasks:     user.Tasks,
+		},
+		Token: string(tokenString),
 	})
+
 	if err != nil {
-		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
-		log.Fatal(err)
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal("Failed to serialize responseJSON:", err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_, err = w.Write(responseJSON)
+
 	if err != nil {
-		http.Error(w, "Failed to write response", http.StatusInternalServerError)
-		log.Fatal(err)
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal("Failed to write response:", err)
 		return
 	}
+}
+
+func (tm *UserModel) userExists(email string) bool {
+	var count int
+	err := tm.Db.QueryRow("SELECT COUNT(*) FROM users WHERE email = ?", email).Scan(&count)
+	if err != nil {
+		log.Println("Failed to query user database:", err)
+		return true
+	}
+	return count > 0
+}
+
+func (tm *UserModel) isValidRole(role string) bool {
+	return role == "Manager" || role == "Technician"
+}
+
+func (tm *UserModel) hashPassword(password string) ([]byte, error) {
+	return bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+}
+
+func (tm *UserModel) insertUser(firstName, lastName, email, password, role string) (int64, error) {
+	result, err := tm.Db.Exec("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)", firstName, lastName, email, password, role)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
 }
 
 func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request) {
@@ -170,8 +161,6 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	fmt.Printf("rows: %v\n", rows)
-
 	// Extract the JWT token from the request header
 	tokenString := r.Header.Get("Authorization")
 	if tokenString == "" {
@@ -179,7 +168,6 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	err = godotenv.Load()
 	if err != nil {
 		log.Println("Error loading .env file", err)
 	}
@@ -224,7 +212,7 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 		tasks = append(tasks, task)
 	}
 
-	response, err := json.Marshal(&tasks)
+	response, err := json.Marshal(tasks)
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Fatal(err)
@@ -377,86 +365,4 @@ func (tm *UserModel) GetUserByEmail(email string) (*entities.User, error) {
 		return nil, err
 	}
 	return &user, nil
-}
-
-func (tm *UserModel) Login(w http.ResponseWriter, r *http.Request) {
-	var credentials struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
-		http.Error(w, "Bad Input", http.StatusBadRequest)
-		return
-	}
-
-	user, err := tm.GetUserByEmail(credentials.Email)
-	if err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	fmt.Printf("user: %v\n", user)
-
-	// Verify the password
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(credentials.Password))
-	if err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	err = godotenv.Load()
-	if err != nil {
-		log.Println("Error loading .env file", err)
-	}
-
-	secret := os.Getenv("SECRET")
-
-	token, tokenErr := GenerateJWTToken(user.ID, secret)
-
-	if tokenErr != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Println("Failed to generate token", tokenErr)
-		return
-	}
-
-	responseJSON, err := json.Marshal(struct {
-		Token string `json:"token"`
-	}{
-		Token: token,
-	})
-	if err != nil {
-		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(responseJSON)
-	if err != nil {
-		http.Error(w, "Failed to write response", http.StatusInternalServerError)
-		return
-	}
-}
-
-func (tm *UserModel) isManager(userID int) bool {
-	var role string
-	err := tm.Db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&role)
-	if err != nil {
-		log.Println("Error retrieving user role:", err)
-		return false
-	}
-	return role == "Manager"
-
-}
-
-func GenerateJWTToken(userID int, secretKey string) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(), // Token expiration time (1 day)
-	})
-	tokenString, err := token.SignedString([]byte(secretKey))
-	if err != nil {
-		return "", err
-	}
-	return tokenString, nil
 }
