@@ -2,6 +2,7 @@
 <project version="4">
   <component name="SqlDialectMappings">
     <file url="file://$PROJECT_DIR$/server/src/handlers/task_handler.go" dialect="MySQL" />
+    <file url="file://$PROJECT_DIR$/server/src/models/helper.go" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/server/src/models/task_model.go" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/server/src/models/user_model.go" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/server/src/tests/models/helper.go" dialect="GenericSQL" />
