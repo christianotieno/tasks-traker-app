@@ -3,14 +3,12 @@ package models
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"os"
+	"strconv"
+	"strings"
 
-	"github.com/dgrijalva/jwt-go"
-	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
@@ -40,11 +38,35 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := entities.User{}
+	user := entities.UserJSON{}
 	err = json.Unmarshal(body, &user)
 	if err != nil {
 		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
 		log.Println("Invalid JSON format:", err)
+		return
+	}
+
+	if user.FirstName == "" || user.LastName == "" || user.Email == "" || user.Role == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		log.Println("Missing required fields")
+		return
+	}
+
+	if user.Password == "" {
+		http.Error(w, "Missing password", http.StatusBadRequest)
+		log.Println("Missing password")
+		return
+	}
+
+	if len(user.Password) < 6 {
+		http.Error(w, "Password must be at least 6 characters", http.StatusBadRequest)
+		log.Println("Password must be at least 6 characters")
+		return
+	}
+
+	if !strings.Contains(user.Email, "@") {
+		http.Error(w, "Invalid email address", http.StatusBadRequest)
+		log.Println("Invalid email address")
 		return
 	}
 
@@ -61,7 +83,7 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Hash user password
-	hashedPassword, err := tm.hashPassword(user.Password)
+	hashedPassword, err := tm.hashPassword([]byte(user.Password))
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Fatal("Failed to hash password:", err)
@@ -69,7 +91,7 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert user details into the database
-	userID, err := tm.insertUser(user.FirstName, user.LastName, user.Email, string(hashedPassword), string(user.Role))
+	userID, err := tm.insertUser(user.FirstName, user.LastName, user.Email, hashedPassword, string(user.Role))
 	if err != nil {
 		http.Error(w, "Something went wrong, try again", http.StatusInternalServerError)
 		log.Fatal("User creation failed:", err)
@@ -77,14 +99,12 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate JWT token
-	tokenString, err := tm.generateToken(int(userID))
+	tokenString, err := tm.generateToken(int(userID), string(user.Role))
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Fatal("Failed to generate token:", err)
 		return
 	}
-
-	user.Password = ""
 
 	responseJSON, err := json.Marshal(struct {
 		User  entities.User `json:"user"`
@@ -131,19 +151,21 @@ func (tm *UserModel) isValidRole(role string) bool {
 	return role == "Manager" || role == "Technician"
 }
 
-func (tm *UserModel) hashPassword(password string) ([]byte, error) {
-	return bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+func (tm *UserModel) hashPassword(password []byte) ([]byte, error) {
+	return bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
 }
 
-func (tm *UserModel) insertUser(firstName, lastName, email, password, role string) (int64, error) {
-	result, err := tm.Db.Exec("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)", firstName, lastName, email, password, role)
+func (tm *UserModel) insertUser(
+	firstName, lastName, email string, hashedPassword []byte, role string,
+) (int64, error) {
+	result, err := tm.Db.Exec("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)", firstName, lastName, email, hashedPassword, role)
 	if err != nil {
 		return 0, err
 	}
 	return result.LastInsertId()
 }
 
-func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request) {
+func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		log.Println("Method not allowed")
@@ -151,13 +173,17 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Retrieve the user ID from the request context
-	userID := r.Context().Value("userID")
-
-	// Only allow access to tasks belonging to the user
-	rows, err := tm.Db.Query("SELECT id, summary, date FROM tasks WHERE user_id = ?", userID)
-	if err != nil {
+	userID, ok := r.Context().Value("userID").(int)
+	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Println("Error retrieving data", err)
+		log.Println("Failed to retrieve user ID")
+		return
+	}
+
+	userRole, ok := r.Context().Value("userRole").(string)
+	if !ok {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Println("Failed to retrieve user role")
 		return
 	}
 
@@ -168,33 +194,17 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Fetch tasks from the database based on the user ID
+	rows, err := tm.Db.Query("SELECT id, summary, date, user_id FROM tasks WHERE user_id = ?", userID)
 	if err != nil {
-		log.Println("Error loading .env file", err)
-	}
-
-	secret := os.Getenv("SECRET")
-
-	// Verify and parse the JWT token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return []byte(secret), nil
-	})
-	if err != nil {
-		http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Println("Error retrieving data", err)
 		return
 	}
-
-	// Check if the token is valid and has not expired
-	if !token.Valid {
-		http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
-		return
-	}
-
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			http.Error(w, "Something went wrong", http.StatusInternalServerError)
-			log.Println(err)
-			return
+			log.Println("Error closing rows:", err)
 		}
 	}(rows)
 
@@ -202,10 +212,30 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request)
 
 	for rows.Next() {
 		task := entities.Task{}
-		err := rows.Scan(&task.ID, &task.Summary, &task.Date)
+		err := rows.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
 		if err != nil {
 			http.Error(w, "Something went wrong", http.StatusInternalServerError)
 			log.Println(err)
+			return
+		}
+
+		var usrID int
+		usrID, err = strconv.Atoi(id)
+		if err != nil {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+			log.Println(err)
+			return
+		}
+
+		// Show user error message if the user ID is not valid
+		if usrID < 1 {
+			http.Error(w, "User ID is not valid", http.StatusBadRequest)
+			return
+		}
+
+		// Only allow access if the user is a manager or technician of the specified user ID
+		if userRole != "Manager" && usrID != task.UserID {
+			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
 		tasks = append(tasks, task)
@@ -235,39 +265,18 @@ func (tm *UserModel) GetAllUsersAndAllTasks(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userIDFloat := r.Context().Value("userID").(float64)
-	userID := int(userIDFloat)
+	// Retrieve the user role from the request context
+	userRole, ok := r.Context().Value("userRole").(string)
+	if !ok {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Println("Failed to retrieve user role")
+		return
+	}
 
-	isManager := tm.isManager(userID)
-	if !isManager {
+	// Only allow access if the user is a manager
+	if userRole != "Manager" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		log.Println("Unauthorized access")
-		return
-	}
-
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("Error loading .env file", err)
-	}
-
-	secret := os.Getenv("SECRET")
-
-	tokenString := r.Header.Get("Authorization")
-	if tokenString == "" {
-		http.Error(w, "Missing authorization token", http.StatusUnauthorized)
-		return
-	}
-
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return []byte(secret), nil
-	})
-	if err != nil {
-		http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
-		return
-	}
-
-	if !token.Valid {
-		http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
 		return
 	}
 
@@ -349,19 +358,4 @@ func (tm *UserModel) GetAllUsersAndAllTasks(w http.ResponseWriter, r *http.Reque
 		log.Println(writeErr)
 		return
 	}
-}
-
-func (tm *UserModel) GetUserByEmail(email string) (*entities.User, error) {
-	row := tm.Db.QueryRow("SELECT id, first_name, last_name, email, password, role FROM users WHERE email = ?", email)
-
-	user := entities.User{}
-
-	err := row.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Password, &user.Role)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("user not found")
-		}
-		return nil, err
-	}
-	return &user, nil
 }
