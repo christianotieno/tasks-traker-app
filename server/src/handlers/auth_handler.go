@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/christianotieno/tasks-traker-app/server/src/config"
+
 	"github.com/joho/godotenv"
 )
 
@@ -26,30 +27,15 @@ func authenticate(next http.Handler) http.Handler {
 		secret := os.Getenv("SECRET")
 
 		// Verify and parse the JWT token
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Provide the same JWT signing key used during token generation
-			return []byte(secret), nil
-		})
+		claims, err := config.VerifyToken(tokenString, []byte(secret))
 		if err != nil {
 			http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
 			return
 		}
 
-		// Check if the token is valid and has not expired
-		if !token.Valid {
-			http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
-			return
-		}
-
-		// Access the user ID from the JWT claims
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			http.Error(w, "Invalid authorization token", http.StatusUnauthorized)
-			return
-		}
-
-		// Pass the user ID to the next handler
-		ctx := context.WithValue(r.Context(), "userID", claims["user_id"])
+		// Pass the user ID and role to the next handler
+		ctx := context.WithValue(r.Context(), "userID", claims.UserID)
+		ctx = context.WithValue(ctx, "userRole", claims.Role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
