@@ -1,14 +1,16 @@
 package models
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"time"
+	"strings"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/christianotieno/tasks-traker-app/server/src/config"
+	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -20,21 +22,22 @@ func (tm *UserModel) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
 		http.Error(w, "Bad Input", http.StatusBadRequest)
+		log.Println("Bad Input:", err)
 		return
 	}
 
 	user, err := tm.GetUserByEmail(credentials.Email)
 	if err != nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		log.Println("Invalid credentials:", err)
 		return
 	}
-
-	fmt.Printf("user: %v\n", user)
 
 	// Verify the password
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(credentials.Password))
 	if err != nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		log.Println("Invalid credentials when checking password:", err)
 		return
 	}
 
@@ -44,25 +47,27 @@ func (tm *UserModel) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	secret := os.Getenv("SECRET")
-
-	token, tokenErr := GenerateJWTToken(user.ID, secret)
-
-	if tokenErr != nil {
+	// Generate JWT token
+	token, err := config.GenerateToken(user.ID, string(user.Role), secret)
+	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Println("Failed to generate token", tokenErr)
+		log.Println("Failed to generate token:", err)
 		return
 	}
 
-	responseJSON, err := json.Marshal(struct {
+	// Construct the response JSON
+	response := struct {
 		Token string `json:"token"`
 	}{
 		Token: token,
-	})
+	}
+	responseJSON, err := json.Marshal(response)
 	if err != nil {
 		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
 		return
 	}
 
+	// Set response headers and write the response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write(responseJSON)
@@ -72,17 +77,7 @@ func (tm *UserModel) Login(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (tm *UserModel) isManager(userID int) bool {
-	var role string
-	err := tm.Db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&role)
-	if err != nil {
-		log.Println("Error retrieving user role:", err)
-		return false
-	}
-	return role == "Manager"
-}
-
-func (tm *UserModel) generateToken(i int) ([]byte, error) {
+func (tm *UserModel) generateToken(userID int, role string) ([]byte, error) {
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("Error loading .env file", err)
@@ -90,7 +85,7 @@ func (tm *UserModel) generateToken(i int) ([]byte, error) {
 
 	secret := os.Getenv("SECRET")
 
-	token, tokenErr := GenerateJWTToken(i, secret)
+	token, tokenErr := config.GenerateToken(userID, role, secret)
 
 	if tokenErr != nil {
 		log.Println("Failed to generate token", tokenErr)
@@ -100,14 +95,22 @@ func (tm *UserModel) generateToken(i int) ([]byte, error) {
 	return []byte(token), nil
 }
 
-func GenerateJWTToken(userID int, secretKey string) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(), // Token expiration time (1 day)
-	})
-	tokenString, err := token.SignedString([]byte(secretKey))
-	if err != nil {
-		return "", err
+func (tm *UserModel) GetUserByEmail(email string) (*entities.UserJSON, error) {
+	if email == "" {
+		return nil, fmt.Errorf("email cannot be empty")
 	}
-	return tokenString, nil
+	email = strings.ToLower(email)
+	row := tm.Db.QueryRow("SELECT id, first_name, last_name, email, password, role FROM users WHERE email = ?", email)
+
+	user := entities.UserJSON{}
+
+	err := row.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Password, &user.Role)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		log.Println("Error retrieving user:", err)
+		return nil, err
+	}
+	return &user, nil
 }
