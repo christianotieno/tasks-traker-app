@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/gorilla/mux"
+
 	"github.com/christianotieno/tasks-traker-app/server/src/models"
 )
 
@@ -14,7 +16,7 @@ func CreateUserHandler(w http.ResponseWriter, r *http.Request) {
 func GetAllTasksByUserHandler(w http.ResponseWriter, r *http.Request) {
 	userHandler := models.UserHandler(db)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userHandler.GetAllTasksByUserID(w, r)
+		userHandler.GetAllTasksByUserID(w, r, mux.Vars(r)["id"])
 	})
 	authenticate(handler).ServeHTTP(w, r)
 }
