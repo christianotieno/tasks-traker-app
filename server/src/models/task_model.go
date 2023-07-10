@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
+	"github.com/christianotieno/tasks-traker-app/server/src/services"
 	"github.com/google/uuid"
 	"io"
 	"log"
@@ -71,6 +72,19 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Task creation failed", http.StatusInternalServerError)
 		log.Println("Task creation failed:", err)
 		return
+	}
+
+	kafkaProducer, err := services.NewKafkaProducer([]string{"localhost:9092"})
+	if err != nil {
+		log.Println("Failed to initialize Kafka producer:", err)
+	} else {
+		go func() {
+			message := "New task created: " + task.Summary
+			err = kafkaProducer.SendMessage([]byte(message))
+			if err != nil {
+				log.Println("Failed to send Kafka message:", err)
+			}
+		}()
 	}
 
 	// Retrieve the created task
