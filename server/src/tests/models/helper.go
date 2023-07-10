@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/brianvoe/gofakeit/v6"
@@ -67,53 +68,64 @@ func unmarshalResponse(t *testing.T, data []byte, v interface{}) {
 	assert.NoError(t, err)
 }
 
-func createTestTask(t *testing.T, db *sql.DB, summary, date string) {
+func createTestTask(t *testing.T, db *sql.DB, userID string) entities.Task {
 	t.Helper()
-	_, err := db.Exec("INSERT INTO tasks (summary, date) VALUES (?, ?, ?)", summary, date)
-	assert.NoError(t, err)
+
+	task := entities.Task{
+		Summary: "Test Task",
+		Date:    "2023-07-05",
+		UserID:  userID,
+	}
+
+	_, err := db.Exec("INSERT INTO tasks (summary, date, user_id) VALUES (?, ?, ?)",
+		task.Summary, task.Date, task.UserID)
+	if err != nil {
+		t.Fatal("Failed to create task in database:", err)
+	}
+
+	err = db.QueryRow("SELECT * FROM tasks WHERE summary = ?", task.Summary).Scan(
+		&task.ID, &task.Summary, &task.Date, &task.UserID)
+	if err != nil {
+		t.Fatal("Failed to retrieve created task from database:", err)
+	}
+
+	return task
 }
 
-func createTestUser(t *testing.T) entities.User {
+func createTestUser(t *testing.T) entities.UserJSON {
 	t.Helper()
-	db, err := config.TestDbConnect()
-	if err != nil {
-		log.Fatal("Failed to connect to test database:", err)
-	}
-	defer func(db *sql.DB) {
-		err := db.Close()
-		if err != nil {
-			log.Println("Failed to close test database connection:", err)
-		}
-	}(db)
 
 	// Generate random user data using gofakeit
-	user := entities.User{
+	user := entities.UserJSON{
 		FirstName: gofakeit.FirstName(),
 		LastName:  gofakeit.LastName(),
 		Email:     gofakeit.Email(),
 		Password:  gofakeit.Password(true, true, true, false, false, 10),
-		Role:      entities.Role(gofakeit.RandomString([]string{"Manager", "Technician"})),
 	}
 
-	// Insert the user into the database
-	_, err = db.Exec("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)",
-		user.FirstName, user.LastName, user.Email, user.Password, user.Role)
+	id := uuid.New().String()
+
+	db, err := config.TestDbConnect()
 	if err != nil {
-		log.Fatal("Failed to create user in database:", err)
+		t.Fatal("Failed to connect to test database:", err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Log("Failed to close test database connection:", err)
+		}
+	}()
+
+	_, err = db.Exec("INSERT INTO users (id, first_name, last_name, email, password) VALUES (?, ?, ?, ?, ?)",
+		id, user.FirstName, user.LastName, user.Email, user.Password)
+	if err != nil {
+		t.Fatal("Failed to create user in database:", err)
 	}
 
-	// Retrieve the created user from the database
-	var lastInsertID int
-	err = db.QueryRow("SELECT LAST_INSERT_ID()").Scan(&lastInsertID)
+	err = db.QueryRow("SELECT * FROM users WHERE id = ?", id).Scan(
+		&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Password)
 	if err != nil {
-		log.Fatal("Failed to retrieve LAST_INSERT_ID():", err)
-	}
-
-	// Retrieve the created user from the database
-	err = db.QueryRow("SELECT * FROM users WHERE id = ?", lastInsertID).Scan(
-		&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Password, &user.Role)
-	if err != nil {
-		log.Fatal("Failed to retrieve created user from database:", err)
+		t.Fatal("Failed to retrieve created user from database:", err)
 	}
 
 	return user
@@ -128,8 +140,8 @@ func stringifyUser(user entities.User) (string, error) {
 	return string(userJSON), nil
 }
 
-func generateUserData(num int) []entities.User {
-	var users []entities.User
+func generateUserData(num int) []entities.UserJSON {
+	var users []entities.UserJSON
 	pw := gofakeit.Password(true, true, true, false, false, 10)
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
 	if err != nil {
@@ -138,13 +150,12 @@ func generateUserData(num int) []entities.User {
 	}
 
 	for i := 0; i < num; i++ {
-		userData := entities.User{
-			ID:        gofakeit.RandomInt([]int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}),
+		userData := entities.UserJSON{
+			ID:        uuid.New().String(),
 			FirstName: gofakeit.FirstName(),
 			LastName:  gofakeit.LastName(),
 			Email:     gofakeit.Email(),
 			Password:  string(hashedPassword),
-			Role:      entities.Role(gofakeit.RandomString([]string{"Manager", "Technician"})),
 		}
 
 		users = append(users, userData)
@@ -153,12 +164,11 @@ func generateUserData(num int) []entities.User {
 	return users
 }
 
-func generateTaskData(num int, userID int) []entities.Task {
+func generateTaskData(num int, userID string) []entities.Task {
 	var tasks []entities.Task
-
 	for i := 0; i < num; i++ {
 		taskData := entities.Task{
-			ID:      gofakeit.RandomInt([]int{1, 100}),
+			ID:      uuid.New().String(),
 			Summary: gofakeit.Sentence(5),
 			Date:    gofakeit.Date().Format("2006-01-02"),
 			UserID:  userID,
@@ -173,20 +183,24 @@ func generateTaskData(num int, userID int) []entities.Task {
 func MockAuthorizationMiddleware(userData entities.User) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), "userID", userData.ID)
+			ctx := context.WithValue(r.Context(), "userID", string(userData.ID))
 			r = r.WithContext(ctx)
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-func generateValidToken(userID int) string {
+func generateValidToken(userID []byte) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"userID": userID,
+		"userID": string(userID),
 		"exp":    time.Now().Add(time.Hour).Unix(),
 	})
 	secret := []byte(os.Getenv("SECRET"))
-	tokenString, _ := token.SignedString(secret)
+	tokenString, err := token.SignedString(secret)
+	if err != nil {
+		log.Println("Failed to generate token:", err)
+		return "", err
+	}
 
-	return tokenString
+	return tokenString, nil
 }

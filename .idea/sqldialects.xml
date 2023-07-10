@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="SqlDialectMappings">
+    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/72f1c488-c561-4b1f-aa6e-183334254a4f/console_7.sql" dialect="MySQL" />
     <file url="file://$PROJECT_DIR$/server/src/handlers/task_handler.go" dialect="MySQL" />
     <file url="file://$PROJECT_DIR$/server/src/models/helper.go" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/server/src/models/task_model.go" dialect="GenericSQL" />
