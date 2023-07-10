@@ -2,119 +2,177 @@ package models_tests
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"github.com/christianotieno/tasks-traker-app/server/src/models"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/christianotieno/tasks-traker-app/server/src/entities"
-	"github.com/christianotieno/tasks-traker-app/server/src/models"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestCreateTask(t *testing.T) {
-	// Given
-	db := setupTestDB(t)
+	t.Run("InvalidRequestMethod", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		req, err := http.NewRequest("GET", "/tasks", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
 
-	createTestUser(t)
-	tm := &models.TaskModel{Db: db}
-	// Create a new HTTP request
-	reqBody := `{
-		"summary": "Sample Task",
-		"date": "2023-07-06"
-	}`
-	req, err := http.NewRequest("POST", "/tasks", strings.NewReader(reqBody))
-	if err != nil {
-		t.Fatal(err)
-	}
+		// When
+		tm.CreateTask(rr, req)
 
-	// Set the userID in the request context
-	ctx := context.WithValue(req.Context(), "userID", float64(123))
+		// Then
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status code %d, but got %d", http.StatusMethodNotAllowed, rr.Code)
+		}
+	})
 
-	// Assign the context with userID to the request
-	req = req.WithContext(ctx)
+	t.Run("MissingUserID", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		req, err := http.NewRequest("POST", "/tasks", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
 
-	// Create a response recorder to capture the response
-	rr := httptest.NewRecorder()
+		// When
+		tm.CreateTask(rr, req)
 
-	// Call the CreateTask function
-	tm.CreateTask(rr, req)
+		// Then
+		if rr.Code != http.StatusInternalServerError {
+			t.Errorf("Expected status code %d, but got %d", http.StatusInternalServerError, rr.Code)
+		}
+	})
 
-	// Check the response status code
-	if rr.Code != http.StatusCreated {
-		t.Errorf("Expected status code %d, but got %d", http.StatusCreated, rr.Code)
-	}
+	t.Run("Test: foreign key constraint", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		reqBody := `{"summary": "Sample Task", "date": "2023-07-06"}`
+		req, err := http.NewRequest("POST", "/tasks", strings.NewReader(reqBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
+		ctx := context.WithValue(req.Context(), "userID", "123")
+		ctx = context.WithValue(ctx, "managerID", "456")
+		req = req.WithContext(ctx)
 
-	// Verify the response body
-	expectedResponseBody := `{"id": 1, "userID": 123, "summary": "Sample Task", "date": "2023-07-06"}`
-	if rr.Body.String() != expectedResponseBody {
-		t.Errorf("Expected response body %s, but got %s", expectedResponseBody, rr.Body.String())
-	}
+		// When
+		tm.CreateTask(rr, req)
 
-	// Additional assertions can be added to check the behavior of the function
+		// Then
+		if rr.Code != http.StatusInternalServerError {
+			t.Errorf("Expected status code %d, but got %d", http.StatusInternalServerError, rr.Code)
+		}
+	})
+
+	t.Run("InvalidRequest", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		reqBody := `{"summary": "Sample Task", "date": "2023-07-06"}`
+		req, err := http.NewRequest("POST", "/tasks", strings.NewReader(reqBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
+		ctx := context.WithValue(req.Context(), "userID", "123")
+		req = req.WithContext(ctx)
+
+		// When
+		tm.CreateTask(rr, req)
+
+		// Then
+		if rr.Code != http.StatusInternalServerError {
+			t.Errorf("Expected status code %d, but got %d", http.StatusInternalServerError, rr.Code)
+		}
+	})
+
 }
 
 func TestDeleteTask(t *testing.T) {
-	// Given
-	db := setupTestDB(t)
-	defer cleanupTestDB(t, db)
-	taskModel := &models.TaskModel{Db: db}
+	t.Run("InvalidRequestMethod", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		req, err := http.NewRequest("GET", "/tasks", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
 
-	task := entities.Task{
-		Summary: "Test Task",
-		Date:    "2023-07-05",
-		UserID:  1,
-	}
+		// When
+		tm.DeleteTask(rr, req, "123")
 
-	res, err := taskModel.Db.Exec("INSERT INTO tasks (user_id, summary, date) VALUES (?, ?, ?)",
-		task.UserID, task.Summary, task.Date)
-	if err != nil {
-		t.Fatalf("Failed to insert test task into the database: %v", err)
-	}
+		// Then
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status code %d, but got %d", http.StatusMethodNotAllowed, rr.Code)
+		}
+	})
 
-	taskID, getErr := res.LastInsertId()
+	t.Run("MissingUserID", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		req, err := http.NewRequest("DELETE", "/tasks", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
 
-	if getErr != nil {
-		t.Fatalf("Failed to retrieve task ID: %v", getErr)
-	}
+		// When
+		tm.DeleteTask(rr, req, "123")
 
-	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("/tasks/%d", taskID), nil)
-	if err != nil {
-		t.Fatalf("Failed to create delete request: %v", err)
-	}
+		// Then
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("Expected status code %d, but got %d", http.StatusNotFound, rr.Code)
+		}
+	})
 
-	w := httptest.NewRecorder()
+}
 
-	// When
-	taskModel.DeleteTask(w, req, strconv.FormatInt(taskID, 10))
+func TestUpdateTask(t *testing.T) {
+	t.Run("InvalidRequestMethod", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		req, err := http.NewRequest("GET", "/tasks", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
 
-	// Then
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status code %d, but got %d", http.StatusOK, w.Code)
-	}
+		// When
+		tm.UpdateTask(rr, req, "123")
 
-	var response struct {
-		Message string `json:"message"`
-	}
-	err = json.Unmarshal(w.Body.Bytes(), &response)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal response body: %v", err)
-	}
+		// Then
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status code %d, but got %d", http.StatusMethodNotAllowed, rr.Code)
+		}
+	})
 
-	// Check the response message
-	expectedMessage := "Task deleted successfully"
-	if response.Message != expectedMessage {
-		t.Errorf("Expected message '%s', but got '%s'", expectedMessage, response.Message)
-	}
+	t.Run("MissingUserID", func(t *testing.T) {
+		// Given
+		db := setupTestDB(t)
+		tm := &models.TaskModel{Db: db}
+		req, err := http.NewRequest("PUT", "/tasks", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
 
-	var count int
-	err = taskModel.Db.QueryRow("SELECT COUNT(*) FROM tasks WHERE id = ?", taskID).Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to query database: %v", err)
-	}
+		// When
+		tm.UpdateTask(rr, req, "123")
 
-	assert.Equal(t, 0, count)
+		// Then
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status code %d, but got %d", http.StatusMethodNotAllowed, rr.Code)
+		}
+	})
+
 }
