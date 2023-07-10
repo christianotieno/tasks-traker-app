@@ -4,13 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/christianotieno/tasks-traker-app/server/src/entities"
+	"github.com/google/uuid"
 	"io"
 	"log"
 	"net/http"
-	"strconv"
-
-	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 )
 
 type TaskModel struct {
@@ -30,22 +28,22 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, ok := r.Context().Value("userID").(int)
+	userID, ok := r.Context().Value("userID").(string)
 	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Println(errors.New("failed to retrieve userID from context"))
 		return
 	}
 
-	userRole, ok := r.Context().Value("userRole").(string)
+	managerID, ok := r.Context().Value("managerID").(string)
 	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Println(errors.New("failed to retrieve userRole from context"))
+		log.Println(errors.New("failed to retrieve managerID from context"))
 		return
 	}
 
-	// Check if the user role is “Technician”
-	if userRole != "Technician" {
+	// Check if the user is a "Technician"
+	if !(managerID != "") {
 		http.Error(w, "Only Technicians can create tasks", http.StatusForbidden)
 		return
 	}
@@ -65,22 +63,19 @@ func (tm *TaskModel) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := tm.Db.Exec("INSERT INTO tasks (user_id, summary, date) VALUES (?, ?, ?)", userID, task.Summary, task.Date)
+	id := uuid.New().String()
+	// Save the task to the database
+	insertQuery := "INSERT INTO tasks (id, summary, date, user_id) VALUES (?, ?, ?, ?)"
+	_, err = tm.Db.Exec(insertQuery, id, task.Summary, task.Date, userID)
 	if err != nil {
 		http.Error(w, "Task creation failed", http.StatusInternalServerError)
 		log.Println("Task creation failed:", err)
 		return
 	}
 
-	taskID, err := result.LastInsertId()
-	if err != nil {
-		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Println("Failed to retrieve created taskID:", err)
-		return
-	}
-
-	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
-	err = row.Scan(&task.ID, &task.UserID, &task.Summary, &task.Date)
+	// Retrieve the created task
+	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
+	err = row.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
 	if err != nil {
 		http.Error(w, "Failed to retrieve created task", http.StatusInternalServerError)
 		log.Println("Failed to retrieve created task:", err)
@@ -111,16 +106,10 @@ func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	taskID, err := strconv.Atoi(id)
-	if err != nil {
-		http.Error(w, "Invalid task ID", http.StatusBadRequest)
-		return
-	}
-
-	tasksRow := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
+	tasksRow := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
 
 	var task entities.Task
-	taskErr := tasksRow.Scan(&task.ID, &task.UserID, &task.Summary, &task.Date)
+	taskErr := tasksRow.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
 	if taskErr != nil {
 		if errors.Is(taskErr, sql.ErrNoRows) {
 			http.Error(w, "Task not found", http.StatusNotFound)
@@ -131,26 +120,40 @@ func (tm *TaskModel) DeleteTask(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	userRole, ok := r.Context().Value("userRole").(string)
-	fmt.Printf("UserRole: %s\n", r.Context().Value("userRole"))
-	fmt.Printf("UserID: %s\n", r.Context().Value("userID"))
-
-	fmt.Printf("userRole: %s\n", userRole)
-
+	managerID, ok := r.Context().Value("managerID").(string)
 	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-		log.Println(errors.New("failed to retrieve userRole from context"))
+		log.Println(errors.New("failed to retrieve managerID from context"))
 		return
 	}
 
-	// Check if the user role is “Manager”
-	if userRole != "Manager" {
-		http.Error(w, "Only Managers can delete tasks", http.StatusForbidden)
+	userID, ok := r.Context().Value("userID").(string)
+	if !ok {
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Println(errors.New("failed to retrieve userID from context"))
+		return
+	}
+
+	// fetch managerID from the database
+	managerRow := tm.Db.QueryRow("SELECT manager_id FROM managers WHERE technician_id = ?", task.UserID)
+	var mID string
+	managerErr := managerRow.Scan(&mID)
+	if managerErr != nil {
+		if errors.Is(managerErr, sql.ErrNoRows) {
+			http.Error(w, "Manager not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		}
+	}
+
+	// Check if the user is a "Manager" and is manager of the user who created the task
+	if !(managerID == "" && userID == mID) {
+		http.Error(w, "Only Managers associated with this user can delete this task", http.StatusForbidden)
 		return
 	}
 
 	// Delete the task from the database
-	_, err = tm.Db.Exec("DELETE FROM tasks WHERE id = ?", taskID)
+	_, err := tm.Db.Exec("DELETE FROM tasks WHERE id = ?", id)
 	if err != nil {
 		http.Error(w, "Task deletion failed", http.StatusInternalServerError)
 		log.Println("Task deletion failed:", err)
@@ -185,16 +188,10 @@ func (tm *TaskModel) UpdateTask(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	taskID, err := strconv.Atoi(id)
-	if err != nil {
-		http.Error(w, "Invalid task ID", http.StatusBadRequest)
-		return
-	}
-
-	tasksRow := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
+	tasksRow := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
 
 	var task entities.Task
-	taskErr := tasksRow.Scan(&task.ID, &task.UserID, &task.Summary, &task.Date)
+	taskErr := tasksRow.Scan(&task.ID, &task.Summary, &task.Date, &task.UserID)
 	if taskErr != nil {
 		if errors.Is(taskErr, sql.ErrNoRows) {
 			http.Error(w, "Task not found", http.StatusNotFound)
@@ -205,21 +202,20 @@ func (tm *TaskModel) UpdateTask(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	userRole, ok := r.Context().Value("userRole").(string)
+	managerID, ok := r.Context().Value("managerID").(string)
 	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
-
-		log.Println(errors.New("failed to retrieve userRole from context"))
+		log.Println(errors.New("failed to retrieve managerID from context"))
 		return
 	}
 
-	// Check if the user role is "Technician"
-	if userRole != "Technician" {
+	// Check if the user is a "Technician"
+	if !(managerID != "") {
 		http.Error(w, "Only Technicians can update their tasks", http.StatusForbidden)
 		return
 	}
 
-	userID, ok := r.Context().Value("userID").(int)
+	userID, ok := r.Context().Value("userID").(string)
 	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Println(errors.New("failed to retrieve userID from context"))
@@ -227,14 +223,14 @@ func (tm *TaskModel) UpdateTask(w http.ResponseWriter, r *http.Request, id strin
 	}
 
 	// Check if the task belongs to the user
-	if task.UserID != userID {
-		http.Error(w, "You can only update your own tasks", http.StatusForbidden)
+	if !(task.UserID == userID) {
+		http.Error(w, "Only the task owner can update this task", http.StatusForbidden)
 		return
 	}
 
 	decoder := json.NewDecoder(r.Body)
 	patchTask := make(map[string]interface{})
-	err = decoder.Decode(&patchTask)
+	err := decoder.Decode(&patchTask)
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusBadRequest)
 		log.Println("Decoding failed:", err)
@@ -257,14 +253,14 @@ func (tm *TaskModel) UpdateTask(w http.ResponseWriter, r *http.Request, id strin
 	}
 
 	// Update the task in the database
-	_, err = tm.Db.Exec("UPDATE tasks SET summary = ?, date = ? WHERE id = ?", task.Summary, task.Date, taskID)
+	_, err = tm.Db.Exec("UPDATE tasks SET summary = ?, date = ? WHERE id = ?", task.Summary, task.Date, id)
 	if err != nil {
 		http.Error(w, "Task update failed", http.StatusInternalServerError)
 		log.Println("Failed to update task:", err)
 		return
 	}
 
-	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", taskID)
+	row := tm.Db.QueryRow("SELECT * FROM tasks WHERE id = ?", id)
 
 	var updatedTask entities.Task
 	err = row.Scan(&updatedTask.ID, &updatedTask.UserID, &updatedTask.Summary, &updatedTask.Date)

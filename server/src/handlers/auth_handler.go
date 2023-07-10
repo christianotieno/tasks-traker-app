@@ -35,7 +35,7 @@ func authenticate(next http.Handler) http.Handler {
 
 		// Pass the user ID and role to the next handler
 		ctx := context.WithValue(r.Context(), "userID", claims.UserID)
-		ctx = context.WithValue(ctx, "userRole", claims.Role)
+		ctx = context.WithValue(ctx, "managerID", claims.ManagerID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

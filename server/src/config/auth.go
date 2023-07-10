@@ -10,10 +10,10 @@ import (
 )
 
 // GenerateToken Generate a JWT token
-func GenerateToken(userID int, role string, secretKey string) (string, error) {
+func GenerateToken(userID string, managerID string, secretKey string) (string, error) {
 	claims := entities.JWTClaims{
-		UserID: userID,
-		Role:   role,
+		UserID:    userID,
+		ManagerID: managerID,
 		StandardClaims: jwt.StandardClaims{
 			IssuedAt:  time.Now().Unix(),
 			ExpiresAt: time.Now().Add(time.Hour * 24).Unix(), // Expires in 24 hours

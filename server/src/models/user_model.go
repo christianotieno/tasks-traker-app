@@ -3,13 +3,12 @@ package models
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log"
 	"net/http"
-	"strconv"
-	"strings"
-
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 )
@@ -34,7 +33,7 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Bad Input", http.StatusBadRequest)
-		log.Println(err)
+		log.Println("Bad Input", err)
 		return
 	}
 
@@ -46,39 +45,8 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.FirstName == "" || user.LastName == "" || user.Email == "" || user.Role == "" {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
-		log.Println("Missing required fields")
-		return
-	}
-
-	if user.Password == "" {
-		http.Error(w, "Missing password", http.StatusBadRequest)
-		log.Println("Missing password")
-		return
-	}
-
-	if len(user.Password) < 6 {
-		http.Error(w, "Password must be at least 6 characters", http.StatusBadRequest)
-		log.Println("Password must be at least 6 characters")
-		return
-	}
-
-	if !strings.Contains(user.Email, "@") {
-		http.Error(w, "Invalid email address", http.StatusBadRequest)
-		log.Println("Invalid email address")
-		return
-	}
-
-	// Check if the email already exists
-	if tm.userExists(user.Email) {
-		http.Error(w, "Email already exists, please try again with a different email", http.StatusBadRequest)
-		return
-	}
-
-	// Validate the role
-	if !tm.isValidRole(string(user.Role)) {
-		http.Error(w, "Invalid role, try again!", http.StatusBadRequest)
+	err = tm.validateUser(user, w)
+	if err != nil {
 		return
 	}
 
@@ -91,15 +59,15 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert user details into the database
-	userID, err := tm.insertUser(user.FirstName, user.LastName, user.Email, hashedPassword, string(user.Role))
+	userID, err := tm.insertUser(user.FirstName, user.LastName, user.Email, hashedPassword, user.ManagerID)
 	if err != nil {
-		http.Error(w, "Something went wrong, try again", http.StatusInternalServerError)
-		log.Fatal("User creation failed:", err)
+		http.Error(w, "Something went wrong", http.StatusInternalServerError)
+		log.Fatal("Account creation failed:", err)
 		return
 	}
 
 	// Generate JWT token
-	tokenString, err := tm.generateToken(int(userID), string(user.Role))
+	tokenString, err := tm.generateToken(userID, user.ManagerID)
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Fatal("Failed to generate token:", err)
@@ -107,18 +75,20 @@ func (tm *UserModel) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	responseJSON, err := json.Marshal(struct {
-		User  entities.User `json:"user"`
-		Token string        `json:"token"`
+		User    entities.User `json:"user"`
+		Message string        `json:"message"`
+		Token   string        `json:"token"`
 	}{
 		User: entities.User{
-			ID:        int(userID),
+			ID:        userID,
 			FirstName: user.FirstName,
 			LastName:  user.LastName,
 			Email:     user.Email,
-			Role:      user.Role,
+			ManagerID: user.ManagerID,
 			Tasks:     user.Tasks,
 		},
-		Token: string(tokenString),
+		Message: "Account creation successful",
+		Token:   tokenString,
 	})
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
@@ -147,22 +117,46 @@ func (tm *UserModel) userExists(email string) bool {
 	return count > 0
 }
 
-func (tm *UserModel) isValidRole(role string) bool {
-	return role == "Manager" || role == "Technician"
-}
-
 func (tm *UserModel) hashPassword(password []byte) ([]byte, error) {
 	return bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
 }
 
-func (tm *UserModel) insertUser(
-	firstName, lastName, email string, hashedPassword []byte, role string,
-) (int64, error) {
-	result, err := tm.Db.Exec("INSERT INTO users (first_name, last_name, email, password, role) VALUES (?, ?, ?, ?, ?)", firstName, lastName, email, hashedPassword, role)
+func (tm *UserModel) insertUser(firstName, lastName, email string, hashedPassword []byte, managerID string) (string, error) {
+	userID := uuid.New().String()
+
+	// Insert the technician or manager
+	query := "INSERT INTO users (id, first_name, last_name, email, password) VALUES (?, ?, ?, ?, ?)"
+	_, err := tm.Db.Exec(query, userID, firstName, lastName, email, hashedPassword)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return result.LastInsertId()
+
+	if managerID != "" {
+		// Check if the manager exists
+		if err != nil {
+			return "", fmt.Errorf("invalid managerID")
+		}
+		managerExistsQuery := "SELECT id FROM users WHERE id = ?"
+		row := tm.Db.QueryRow(managerExistsQuery, managerID)
+		var mID string
+		err = row.Scan(&mID)
+		fmt.Printf("managerID: %v\n", managerID)
+		if err != nil {
+			return "", fmt.Errorf("manager does not exist")
+		}
+
+		// Insert the manager-technician relationship if managerID is not nil
+		if managerID != "" {
+			id := uuid.New().String()
+			relationshipQuery := "INSERT INTO managers (id, manager_id, technician_id) VALUES (?, ?, ?)"
+			_, err = tm.Db.Exec(relationshipQuery, id, managerID, userID)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+
+	return userID, nil
 }
 
 func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request, id string) {
@@ -173,14 +167,14 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Retrieve the user ID from the request context
-	userID, ok := r.Context().Value("userID").(int)
+	userID, ok := r.Context().Value("userID").(string)
 	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Println("Failed to retrieve user ID")
 		return
 	}
 
-	userRole, ok := r.Context().Value("userRole").(string)
+	managerID, ok := r.Context().Value("managerID").(string)
 	if !ok {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Println("Failed to retrieve user role")
@@ -219,25 +213,12 @@ func (tm *UserModel) GetAllTasksByUserID(w http.ResponseWriter, r *http.Request,
 			return
 		}
 
-		var usrID int
-		usrID, err = strconv.Atoi(id)
-		if err != nil {
-			http.Error(w, "Something went wrong", http.StatusInternalServerError)
-			log.Println(err)
-			return
-		}
-
-		// Show user error message if the user ID is not valid
-		if usrID < 1 {
-			http.Error(w, "User ID is not valid", http.StatusBadRequest)
-			return
-		}
-
-		// Only allow access if the user is a manager or technician of the specified user ID
-		if userRole != "Manager" && usrID != task.UserID {
+		// Only allow access if the user is a manager or the technician of the specified user ID
+		if !(id == managerID || id == task.UserID) {
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
+
 		tasks = append(tasks, task)
 	}
 
@@ -280,7 +261,7 @@ func (tm *UserModel) GetAllUsersAndAllTasks(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userRows, usersErr := tm.Db.Query("SELECT id, first_name, last_name, email, role FROM users")
+	userRows, usersErr := tm.Db.Query("SELECT id, first_name, last_name, email, role, manager_id FROM users")
 	if usersErr != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Println(usersErr)
@@ -300,7 +281,7 @@ func (tm *UserModel) GetAllUsersAndAllTasks(w http.ResponseWriter, r *http.Reque
 
 	for userRows.Next() {
 		user := entities.User{}
-		err := userRows.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Role)
+		err := userRows.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.ManagerID)
 		if err != nil {
 			http.Error(w, "Something went wrong", http.StatusInternalServerError)
 			log.Println(err)

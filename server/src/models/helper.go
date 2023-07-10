@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -48,7 +49,9 @@ func (tm *UserModel) Login(w http.ResponseWriter, r *http.Request) {
 
 	secret := os.Getenv("SECRET")
 	// Generate JWT token
-	token, err := config.GenerateToken(user.ID, string(user.Role), secret)
+	userID := user.ID
+	managerID := user.ManagerID
+	token, err := config.GenerateToken(userID, managerID, secret)
 	if err != nil {
 		http.Error(w, "Something went wrong", http.StatusInternalServerError)
 		log.Println("Failed to generate token:", err)
@@ -77,7 +80,7 @@ func (tm *UserModel) Login(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (tm *UserModel) generateToken(userID int, role string) ([]byte, error) {
+func (tm *UserModel) generateToken(userID string, managerID string) (string, error) {
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("Error loading .env file", err)
@@ -85,14 +88,14 @@ func (tm *UserModel) generateToken(userID int, role string) ([]byte, error) {
 
 	secret := os.Getenv("SECRET")
 
-	token, tokenErr := config.GenerateToken(userID, role, secret)
+	token, tokenErr := config.GenerateToken(userID, managerID, secret)
 
 	if tokenErr != nil {
 		log.Println("Failed to generate token", tokenErr)
-		return nil, tokenErr
+		return "", tokenErr
 	}
 
-	return []byte(token), nil
+	return token, nil
 }
 
 func (tm *UserModel) GetUserByEmail(email string) (*entities.UserJSON, error) {
@@ -100,11 +103,11 @@ func (tm *UserModel) GetUserByEmail(email string) (*entities.UserJSON, error) {
 		return nil, fmt.Errorf("email cannot be empty")
 	}
 	email = strings.ToLower(email)
-	row := tm.Db.QueryRow("SELECT id, first_name, last_name, email, password, role FROM users WHERE email = ?", email)
 
 	user := entities.UserJSON{}
 
-	err := row.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Password, &user.Role)
+	usersRow := tm.Db.QueryRow("SELECT id, first_name, last_name, email, password FROM users WHERE email = ?", email)
+	err := usersRow.Scan(&user.ID, &user.FirstName, &user.LastName, &user.Email, &user.Password)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("user not found")
@@ -112,5 +115,58 @@ func (tm *UserModel) GetUserByEmail(email string) (*entities.UserJSON, error) {
 		log.Println("Error retrieving user:", err)
 		return nil, err
 	}
+
+	managersRow := tm.Db.QueryRow("SELECT manager_id FROM managers WHERE technician_id = ?", user.ID)
+	var managerID string
+	err = managersRow.Scan(&managerID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return &user, nil
+		}
+		log.Println("Error retrieving manager:", err)
+		return nil, err
+	}
+
+	user.ManagerID = managerID
+
+	fmt.Printf("User: %+v\n", user)
 	return &user, nil
+}
+
+func (tm *UserModel) validateUser(user entities.UserJSON, w http.ResponseWriter) error {
+	if user.FirstName == "" {
+		return httpError(w, http.StatusBadRequest, "Missing required fields: first_name")
+	}
+
+	if user.LastName == "" {
+		return httpError(w, http.StatusBadRequest, "Missing required fields: last_name")
+	}
+
+	if user.Email == "" {
+		return httpError(w, http.StatusBadRequest, "Missing required fields: email")
+	}
+
+	if user.Password == "" {
+		return httpError(w, http.StatusBadRequest, "Missing password")
+	}
+
+	if len(user.Password) < 6 {
+		return httpError(w, http.StatusBadRequest, "Password must be at least 6 characters")
+	}
+
+	if !strings.Contains(user.Email, "@") {
+		return httpError(w, http.StatusBadRequest, "Invalid email address")
+	}
+
+	if tm.userExists(user.Email) {
+		return httpError(w, http.StatusBadRequest, "Email already exists, please try again with a different email")
+	}
+
+	return nil
+}
+
+func httpError(w http.ResponseWriter, statusCode int, message string) error {
+	http.Error(w, message, statusCode)
+	log.Println(message)
+	return errors.New(message)
 }
