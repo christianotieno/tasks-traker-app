@@ -27,5 +27,14 @@ func main() {
 		}
 	}()
 
-	handlers.RouteHandler()
+	// Start the server
+	go func() {
+		handlers.RouteHandler()
+	}()
+
+	// Start Kafka consumer
+	go handlers.HandleKafkaMessages([]string{"localhost:9092"})
+
+	// Keep the main function running
+	select {}
 }
