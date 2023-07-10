@@ -4,11 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log"
 	"net/http"
+
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/christianotieno/tasks-traker-app/server/src/entities"
 )

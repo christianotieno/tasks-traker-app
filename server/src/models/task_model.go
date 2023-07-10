@@ -4,12 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/christianotieno/tasks-traker-app/server/src/entities"
-	"github.com/christianotieno/tasks-traker-app/server/src/services"
-	"github.com/google/uuid"
 	"io"
 	"log"
 	"net/http"
+
+	"github.com/christianotieno/tasks-traker-app/server/src/entities"
+	"github.com/christianotieno/tasks-traker-app/server/src/services"
+	"github.com/google/uuid"
 )
 
 type TaskModel struct {

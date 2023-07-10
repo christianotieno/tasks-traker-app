@@ -1,10 +1,11 @@
 package models_tests
 
 import (
-	"github.com/christianotieno/tasks-traker-app/server/src/models"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/christianotieno/tasks-traker-app/server/src/models"
 )
 
 func TestCreateUser(t *testing.T) {

@@ -2,8 +2,9 @@ package handlers
 
 import (
 	"context"
-	"github.com/segmentio/kafka-go"
 	"log"
+
+	"github.com/segmentio/kafka-go"
 )
 
 // HandleKafkaMessages starts consuming Kafka messages.

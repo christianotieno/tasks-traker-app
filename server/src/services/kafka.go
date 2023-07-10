@@ -2,8 +2,9 @@ package services
 
 import (
 	"context"
-	"github.com/segmentio/kafka-go"
 	"log"
+
+	"github.com/segmentio/kafka-go"
 )
 
 type KafkaProducer struct {

@@ -2,11 +2,12 @@ package models_tests
 
 import (
 	"context"
-	"github.com/christianotieno/tasks-traker-app/server/src/models"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/christianotieno/tasks-traker-app/server/src/models"
 )
 
 func TestCreateTask(t *testing.T) {
@@ -92,7 +93,6 @@ func TestCreateTask(t *testing.T) {
 			t.Errorf("Expected status code %d, but got %d", http.StatusInternalServerError, rr.Code)
 		}
 	})
-
 }
 
 func TestDeleteTask(t *testing.T) {
@@ -133,7 +133,6 @@ func TestDeleteTask(t *testing.T) {
 			t.Errorf("Expected status code %d, but got %d", http.StatusNotFound, rr.Code)
 		}
 	})
-
 }
 
 func TestUpdateTask(t *testing.T) {
@@ -174,5 +173,4 @@ func TestUpdateTask(t *testing.T) {
 			t.Errorf("Expected status code %d, but got %d", http.StatusMethodNotAllowed, rr.Code)
 		}
 	})
-
 }
