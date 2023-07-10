@@ -1,0 +1,6 @@
+local('docker-compose build', deps=['docker-compose.yaml'])
+local('docker-compose up -d', deps=['docker-compose.yaml'])
+
+local('tilt up', deps=['Dockerfile', 'tilt.yml'])
+
+local('docker-compose down', deps=['docker-compose.yaml'])
