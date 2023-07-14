@@ -1,0 +1,7 @@
+docker_compose:
+  path: docker-compose.yaml
+  live_update:
+    container: app
+    paths:
+      - 'src/**/*.go'
+  env_file: .env

@@ -1,19 +1,40 @@
 package main
 
 import (
-	"fmt"
-	"github.com/christianotieno/tasks-traker-app/server/handlers"
 	"log"
-	"net/http"
+
+	"github.com/joho/godotenv"
+
+	"github.com/christianotieno/tasks-traker-app/server/src/handlers"
 )
 
 func main() {
-	taskHandler := handlers.NewTaskHandler()
-	homeHandler := handlers.HomeHandler
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	err = handlers.InitDbConnection()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	defer func() {
+		err := handlers.CloseDbConnection()
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+	}()
 
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/tasks", taskHandler.CreateTask)
+	// Start the server
+	go func() {
+		handlers.RouteHandler()
+	}()
 
-	fmt.Println("Server listening on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Start Kafka consumer
+	go handlers.HandleKafkaMessages([]string{"localhost:9092"})
+
+	// Keep the main function running
+	select {}
 }
